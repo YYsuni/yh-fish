@@ -1,8 +1,17 @@
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { type CaptureStatusResponse, type PageMatchPayload, getCaptureWsUrl, getCaptureStatus, postCaptureFps } from '../lib/api-client'
+import {
+	type CaptureStatusResponse,
+	type PageMatchPayload,
+	getCaptureWsUrl,
+	getCaptureStatus,
+	postCaptureFps,
+	postCaptureMatchThreshold
+} from '../lib/api-client'
 
 const FPS_MIN = 1
 const FPS_MAX = 60
+const MATCH_TH_MIN = 0
+const MATCH_TH_MAX = 1
 /** 二进制帧：`float32 BE` FPS + `uint32 BE` meta UTF-8 字节数 + JSON + 图像 */
 const WS_PREVIEW_HEADER_BYTES = 8
 
@@ -38,6 +47,8 @@ export function CapturePreviewSection() {
 	const [streamKey, setStreamKey] = useState(0)
 	const [fpsDraft, setFpsDraft] = useState(15)
 	const [fpsSaving, setFpsSaving] = useState(false)
+	const [matchThDraft, setMatchThDraft] = useState(0.5)
+	const [matchThSaving, setMatchThSaving] = useState(false)
 	const [liveFps, setLiveFps] = useState<number | null>(null)
 	const [pageMatch, setPageMatch] = useState<PageMatchPayload>(null)
 	const [matchBoxCss, setMatchBoxCss] = useState<CSSProperties | null>(null)
@@ -45,6 +56,7 @@ export function CapturePreviewSection() {
 	const [cropDims, setCropDims] = useState<{ w: number; h: number } | null>(null)
 	const [layoutTick, setLayoutTick] = useState(0)
 	const fpsSyncedOnce = useRef(false)
+	const matchThSyncedOnce = useRef(false)
 	const canvasRef = useRef<HTMLCanvasElement>(null)
 	const previewMimeRef = useRef('image/jpeg')
 
@@ -58,6 +70,11 @@ export function CapturePreviewSection() {
 			if (!fpsSyncedOnce.current) {
 				setFpsDraft(Math.round(c.fps))
 				fpsSyncedOnce.current = true
+			}
+			if (!matchThSyncedOnce.current) {
+				const th = Number(c.page_match_threshold)
+				setMatchThDraft(Number.isFinite(th) ? th : 0.5)
+				matchThSyncedOnce.current = true
 			}
 			setError(null)
 		} catch (e) {
@@ -217,6 +234,23 @@ export function CapturePreviewSection() {
 		}
 	}, [fpsDraft, refreshCapture])
 
+	const applyMatchThreshold = useCallback(async () => {
+		const t = Math.min(MATCH_TH_MAX, Math.max(MATCH_TH_MIN, Number(matchThDraft)))
+		setMatchThDraft(t)
+		setMatchThSaving(true)
+		try {
+			const { page_match_threshold } = await postCaptureMatchThreshold(t)
+			setMatchThDraft(page_match_threshold)
+			setStreamKey(k => k + 1)
+			setError(null)
+			void refreshCapture()
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e))
+		} finally {
+			setMatchThSaving(false)
+		}
+	}, [matchThDraft, refreshCapture])
+
 	const summaryMatch = pageMatch ?? parsePageMatch(capture?.page_match ?? null)
 
 	return (
@@ -265,25 +299,53 @@ export function CapturePreviewSection() {
 						</button>
 					</div>
 				</div>
+				<div className='flex flex-col gap-1'>
+					<label htmlFor='capture-match-th' className='text-xs font-medium text-slate-500'>
+						模板匹配阈值（0–1，越高越苛刻）
+					</label>
+					<div className='flex items-center gap-2'>
+						<input
+							id='capture-match-th'
+							type='range'
+							min={MATCH_TH_MIN}
+							max={MATCH_TH_MAX}
+							step={0.01}
+							value={matchThDraft}
+							onChange={e => setMatchThDraft(Number(e.target.value))}
+							className='w-40 accent-slate-700'
+						/>
+						<input
+							type='number'
+							min={MATCH_TH_MIN}
+							max={MATCH_TH_MAX}
+							step={0.01}
+							value={matchThDraft}
+							onChange={e => setMatchThDraft(Number(e.target.value))}
+							className='w-16 rounded-lg border border-slate-200 bg-white px-2 py-1 text-center text-xs text-slate-800 tabular-nums'
+						/>
+						<button
+							type='button'
+							disabled={matchThSaving}
+							className='rounded-xl bg-white px-3 py-2 text-xs font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-50'
+							onClick={() => void applyMatchThreshold()}>
+							{matchThSaving ? '保存中…' : '应用'}
+						</button>
+					</div>
+				</div>
 			</div>
 
 			<div className='mt-5 grid grid-cols-2 gap-3'>
 				<div className='rounded-xl bg-slate-50/90 p-3 ring-1 ring-slate-100 sm:col-span-2'>
-					<p className='text-xs font-medium tracking-wider text-slate-500 uppercase'>OpenCV 页面（裁剪后坐标）</p>
+					<p className='text-xs font-medium tracking-wider text-slate-500 uppercase'>页面识别</p>
 					<p className='mt-1 text-sm text-slate-900'>{summaryMatch?.page_label || '—'}</p>
 					<p className='mt-1 font-mono text-xs text-slate-600'>
-						{summaryMatch && summaryMatch.w > 0
-							? `x=${summaryMatch.x} y=${summaryMatch.y} w=${summaryMatch.w} h=${summaryMatch.h} · ${summaryMatch.similarity.toFixed(4)}`
-							: '—'}
+						{summaryMatch && summaryMatch.w > 0 ? `x=${summaryMatch.x} y=${summaryMatch.y} w=${summaryMatch.w} h=${summaryMatch.h}` : '—'}
 					</p>
+					<p className='mt-1 font-mono text-xs text-slate-600'>相似度：{summaryMatch.similarity.toFixed(4)}</p>
 				</div>
 				<div className='rounded-xl bg-slate-50/90 p-3 ring-1 ring-slate-100'>
 					<p className='text-xs font-medium tracking-wider text-slate-500 uppercase'>窗口尺寸</p>
 					<p className='mt-1 font-mono text-sm text-slate-900'>{capture && capture.width > 0 ? `${capture.width} × ${capture.height}` : '—'}</p>
-				</div>
-				<div className='rounded-xl bg-slate-50/90 p-3 ring-1 ring-slate-100'>
-					<p className='text-xs font-medium tracking-wider text-slate-500 uppercase'>窗口 ID</p>
-					<p className='mt-1 font-mono text-xs text-slate-700'>{capture?.hwnd != null ? String(capture.hwnd) : '—'}</p>
 				</div>
 			</div>
 		</section>

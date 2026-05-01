@@ -234,6 +234,17 @@ class PageTemplateMatcher:
             rank += 1
         self._priority_rank = priority_rank
 
+    def get_match_threshold(self) -> float:
+        """TM_CCOEFF_NORMED 判定下限，约 [0,1]。"""
+        return float(self._threshold)
+
+    def set_match_threshold(self, value: float) -> float:
+        """限定在 [0,1]，返回钳制后的值。"""
+        v = float(value)
+        v = max(0.0, min(v, 1.0))
+        self._threshold = v
+        return v
+
     def reload(self) -> None:
         """强制下次 `match` 重新读盘（优先级、模板等均重载）。"""
         self._loaded = False

@@ -164,6 +164,7 @@ class CaptureStatus:
     fps: float
     preview_mime: str
     page_match: dict[str, object] | None
+    page_match_threshold: float
 
 
 def _page_match_dict(m: object) -> dict[str, object] | None:
@@ -210,6 +211,10 @@ class CaptureService:
         with self._lock:
             self._fps = _clamp_fps(fps)
             return self._fps
+
+    def set_page_match_threshold(self, threshold: float) -> float:
+        """设置 OpenCV 模板匹配下限（0–1）；立即作用于后续帧。"""
+        return self._page_matcher.set_match_threshold(threshold)
 
     def mjpeg_sleep_s(self) -> float:
         """MJPEG / WS 推送侧等待下一帧的最长阻塞时间（秒），与 FPS 一致。"""
@@ -271,6 +276,7 @@ class CaptureService:
                 fps=self._fps,
                 preview_mime=current_preview_mime(),
                 page_match=self._page_match,
+                page_match_threshold=self._page_matcher.get_match_threshold(),
             )
 
     def _live_fps_unlocked(self) -> float:

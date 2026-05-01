@@ -25,6 +25,12 @@ class SetFpsBody(BaseModel):
     fps: float = Field(ge=1, le=60)
 
 
+class SetMatchThresholdBody(BaseModel):
+    """POST `/api/capture/match-threshold` 的请求体。"""
+
+    threshold: float = Field(ge=0, le=1)
+
+
 def create_app(
     *,
     capture: CaptureService,
@@ -67,12 +73,18 @@ def create_app(
             "fps": s.fps,
             "preview_mime": s.preview_mime,
             "page_match": s.page_match,
+            "page_match_threshold": s.page_match_threshold,
         }
 
     @app.post("/api/capture/fps")
     def cap_set_fps(body: SetFpsBody) -> dict[str, float]:
         """设置捕获循环与预览推送的目标帧率（1–60）。"""
         return {"fps": capture.set_fps(body.fps)}
+
+    @app.post("/api/capture/match-threshold")
+    def cap_set_match_threshold(body: SetMatchThresholdBody) -> dict[str, float]:
+        """设置页面模板匹配的相似度下限（0–1，越大越苛刻）。"""
+        return {"page_match_threshold": capture.set_page_match_threshold(body.threshold)}
 
     @app.websocket("/api/capture/ws")
     async def cap_ws(ws: WebSocket) -> None:

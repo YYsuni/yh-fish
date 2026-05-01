@@ -18,6 +18,8 @@ export type CaptureStatusResponse = {
 	fps: number
 	preview_mime: string
 	page_match: PageMatchPayload
+	/** OpenCV 模板匹配判定下限 TM_CCOEFF_NORMED，约 [0,1] */
+	page_match_threshold: number
 }
 
 /** 与当前页面同源；开发时代理由 Vite 转发 WS */
@@ -49,5 +51,12 @@ export function postCaptureFps(fps: number) {
 	return fetchJson<{ fps: number }>('/api/capture/fps', {
 		method: 'POST',
 		body: JSON.stringify({ fps })
+	})
+}
+
+export function postCaptureMatchThreshold(threshold: number) {
+	return fetchJson<{ page_match_threshold: number }>('/api/capture/match-threshold', {
+		method: 'POST',
+		body: JSON.stringify({ threshold })
 	})
 }
