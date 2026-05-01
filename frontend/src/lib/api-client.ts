@@ -4,11 +4,13 @@ export type CaptureStatusResponse = {
 	width: number
 	height: number
 	fps: number
+	preview_mime: string
 }
 
-export function getCaptureMjpegUrl(): string {
-	const base = import.meta.env.DEV ? 'http://127.0.0.1:8848' : ''
-	return `${base}/api/capture/mjpeg`
+/** 与当前页面同源；开发时代理由 Vite 转发 WS */
+export function getCaptureWsUrl(): string {
+	const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+	return `${proto}//${window.location.host}/api/capture/ws`
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {

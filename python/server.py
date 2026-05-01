@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-import time
+import asyncio
+import struct
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from capture_service import CaptureService
+
+WS_PREVIEW_FPS_PREFIX = struct.Struct('>f')
 
 
 class SetFpsBody(BaseModel):
@@ -53,7 +56,7 @@ def create_app(
 
     @app.get("/api/capture/status")
     def cap_status() -> dict[str, Any]:
-        """返回窗口是否就绪、HWND、裁剪后尺寸、当前 FPS。"""
+        """返回窗口是否就绪、HWND、裁剪后尺寸、当前 FPS、预览 MIME。"""
         s = capture.get_status()
         return {
             "ok": s.ok,
@@ -61,26 +64,56 @@ def create_app(
             "width": s.width,
             "height": s.height,
             "fps": s.fps,
+            "preview_mime": s.preview_mime,
         }
 
     @app.post("/api/capture/fps")
     def cap_set_fps(body: SetFpsBody) -> dict[str, float]:
-        """设置捕获循环与 MJPEG 推送的目标帧率（1–60）。"""
+        """设置捕获循环与预览推送的目标帧率（1–60）。"""
         return {"fps": capture.set_fps(body.fps)}
+
+    @app.websocket("/api/capture/ws")
+    async def cap_ws(ws: WebSocket) -> None:
+        """预览 WebSocket：首条文本 JSON `mime`；随后每条二进制为 `>f` 实测 FPS + 图像字节。"""
+        await ws.accept()
+        await ws.send_json({"mime": capture.preview_mime()})
+        loop = asyncio.get_running_loop()
+        try:
+            pix, fps = await loop.run_in_executor(None, capture.get_preview_with_live_fps)
+            await ws.send_bytes(WS_PREVIEW_FPS_PREFIX.pack(fps) + pix)
+            while True:
+                timeout = capture.mjpeg_sleep_s()
+                pix, fps = await loop.run_in_executor(
+                    None,
+                    capture.wait_next_preview_with_live_fps,
+                    timeout,
+                )
+                await ws.send_bytes(WS_PREVIEW_FPS_PREFIX.pack(fps) + pix)
+        except WebSocketDisconnect:
+            pass
 
     @app.get("/api/capture/mjpeg")
     def cap_mjpeg() -> StreamingResponse:
-        """multipart MJPEG 流，供前端 `<img>` 预览。"""
+        """multipart MJPEG 流（调试或兼容）；分片 Content-Type 与 `preview_mime` 一致。"""
         boundary = b"frame"
+        ct = capture.preview_mime().encode("ascii")
 
         def gen():
-            """按当前 FPS 间隔推送 JPEG 分片。"""
+            """首帧立即送出；之后在新帧就绪时唤醒，否则按 FPS 兜底。"""
+            chunk = capture.get_preview_bytes()
+            hdr = b"--" + boundary + b"\r\nContent-Type: " + ct + b"\r\n\r\n"
             while True:
-                chunk = capture.get_jpeg()
-                yield b"--" + boundary + b"\r\nContent-Type: image/jpeg\r\n\r\n" + chunk + b"\r\n"
-                time.sleep(capture.mjpeg_sleep_s())
+                yield hdr + chunk + b"\r\n"
+                chunk = capture.wait_next_frame(timeout_s=capture.mjpeg_sleep_s())
 
-        return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
+        return StreamingResponse(
+            gen(),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        )
 
     if serve_static and dist_dir.is_dir():
         index = dist_dir / "index.html"

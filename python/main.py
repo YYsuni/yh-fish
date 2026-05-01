@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> None:
 
     url = args.url if args.dev else f"http://{args.host}:{args.port}"
     webview.create_window(
-        "异环钓鱼", url, width=920, height=720, min_size=(480, 520), resizable=True
+        "异环钓鱼", url, width=600, height=600, min_size=(480, 520), resizable=True
     )
 
     try:

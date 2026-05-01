@@ -1,8 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { type CaptureStatusResponse, getCaptureMjpegUrl, getCaptureStatus, postCaptureFps } from '../lib/api-client'
+import { type CaptureStatusResponse, getCaptureWsUrl, getCaptureStatus, postCaptureFps } from '../lib/api-client'
 
 const FPS_MIN = 1
 const FPS_MAX = 60
+
+const WS_LIVE_FPS_BYTES = 4
+
+/** 绘制左上角由服务端统计的实测 FPS */
+function drawLiveFpsBadge(ctx: CanvasRenderingContext2D, canvasW: number, liveFps: number) {
+	const margin = Math.max(10, Math.round(canvasW * 0.018))
+	const fontSize = Math.max(14, Math.round(canvasW * 0.034))
+	const label =
+		liveFps < 0.05 ? '— FPS' : `${liveFps >= 10 ? Math.round(liveFps) : liveFps.toFixed(1)} FPS`
+	ctx.save()
+	ctx.font = `600 ${fontSize}px ui-monospace, SFMono-Regular, monospace`
+	const tw = ctx.measureText(label).width
+	const bh = Math.round(fontSize * 1.45)
+	const bw = tw + fontSize * 1.1
+	const x = margin
+	const y = margin
+	ctx.fillStyle = 'rgba(15, 23, 42, 0.75)'
+	if (typeof ctx.roundRect === 'function') {
+		ctx.beginPath()
+		ctx.roundRect(x, y, bw, bh, 8)
+		ctx.fill()
+	} else {
+		ctx.fillRect(x, y, bw, bh)
+	}
+	ctx.fillStyle = '#f1f5f9'
+	ctx.textBaseline = 'middle'
+	ctx.textAlign = 'left'
+	ctx.fillText(label, x + fontSize * 0.55, y + bh / 2)
+	ctx.restore()
+}
 
 export function CapturePreviewSection() {
 	const [capture, setCapture] = useState<CaptureStatusResponse | null>(null)
@@ -11,11 +41,14 @@ export function CapturePreviewSection() {
 	const [fpsDraft, setFpsDraft] = useState(15)
 	const [fpsSaving, setFpsSaving] = useState(false)
 	const fpsSyncedOnce = useRef(false)
+	const canvasRef = useRef<HTMLCanvasElement>(null)
+	const previewMimeRef = useRef('image/jpeg')
 
 	const refreshCapture = useCallback(async () => {
 		try {
 			const c = await getCaptureStatus()
 			setCapture(c)
+			previewMimeRef.current = c.preview_mime
 			if (!fpsSyncedOnce.current) {
 				setFpsDraft(Math.round(c.fps))
 				fpsSyncedOnce.current = true
@@ -31,6 +64,67 @@ export function CapturePreviewSection() {
 		const id = setInterval(() => void refreshCapture(), 800)
 		return () => clearInterval(id)
 	}, [refreshCapture])
+
+	useEffect(() => {
+		const canvas = canvasRef.current
+		if (!canvas) return
+
+		let cancelled = false
+		const ws = new WebSocket(getCaptureWsUrl())
+		ws.binaryType = 'arraybuffer'
+
+		ws.onmessage = async ev => {
+			if (typeof ev.data === 'string') {
+				try {
+					const o = JSON.parse(ev.data) as { mime?: string }
+					if (o.mime) previewMimeRef.current = o.mime
+				} catch {
+					/* ignore */
+				}
+				return
+			}
+			const buf = ev.data as ArrayBuffer
+			if (buf.byteLength <= WS_LIVE_FPS_BYTES) return
+
+			const view = new DataView(buf)
+			const liveFps = view.getFloat32(0, false)
+			const imageBuf = buf.slice(WS_LIVE_FPS_BYTES)
+
+			const mime = previewMimeRef.current
+			try {
+				const blob = new Blob([imageBuf], { type: mime })
+				const bmp = await createImageBitmap(blob)
+				const ctx = canvas.getContext('2d')
+				if (!ctx) {
+					bmp.close()
+					return
+				}
+				if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
+					canvas.width = bmp.width
+					canvas.height = bmp.height
+				}
+				ctx.drawImage(bmp, 0, 0)
+				bmp.close()
+
+				drawLiveFpsBadge(ctx, canvas.width, liveFps)
+			} catch (e) {
+				if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+			}
+		}
+
+		ws.onerror = () => {
+			if (!cancelled) setError('预览连接异常')
+		}
+		ws.onclose = ev => {
+			if (cancelled) return
+			if (!ev.wasClean && ev.code !== 1000) setError(`预览已断开 (${ev.code})`)
+		}
+
+		return () => {
+			cancelled = true
+			ws.close()
+		}
+	}, [streamKey])
 
 	const applyFps = useCallback(async () => {
 		const n = Math.min(FPS_MAX, Math.max(FPS_MIN, Math.round(Number(fpsDraft)) || FPS_MIN))
@@ -49,11 +143,9 @@ export function CapturePreviewSection() {
 		}
 	}, [fpsDraft, refreshCapture])
 
-	const mjpegSrc = `${getCaptureMjpegUrl()}?k=${streamKey}`
-
 	return (
 		<section className='mb-8 w-[400px]'>
-			<img key={streamKey} src={mjpegSrc} className='block w-full rounded-md' />
+			<canvas ref={canvasRef} className='block max-h-[480px] w-full rounded-md bg-slate-100 object-contain' />
 
 			{error && <p className='mt-5 text-red-500'>{error}</p>}
 

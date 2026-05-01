@@ -111,7 +111,7 @@ class WgcHwndStreamer:
                 raw = np.ascontiguousarray(frame.frame_buffer).tobytes()
                 img = Image.frombytes("RGBA", (w, h), raw, "raw", "BGRA").convert("RGB")
                 bio = io.BytesIO()
-                img.save(bio, format="JPEG", quality=quality, optimize=True)
+                img.save(bio, format="JPEG", quality=quality, optimize=False)
                 data = bio.getvalue()
                 with self._lock:
                     self._latest = (data, w, h)
