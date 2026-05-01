@@ -13,6 +13,8 @@ from dataclasses import dataclass
 
 from PIL import Image
 
+from page_template_match import PageTemplateMatcher
+
 if sys.platform == "win32":
     from native_stream import WgcHwndStreamer, native_backend_available
 else:
@@ -48,9 +50,7 @@ def _webp_supported() -> bool:
         return False
 
 
-_effective_preview_codec = (
-    "webp" if _requested_codec == "webp" and _webp_supported() else "jpeg"
-)
+_effective_preview_codec = "webp" if _requested_codec == "webp" and _webp_supported() else "jpeg"
 if _requested_codec == "webp" and _effective_preview_codec != "webp":
     print(
         "YH_FISH_PREVIEW_CODEC=webp 但当前 Pillow 不支持 WEBP 编码，已回退为 jpeg",
@@ -117,12 +117,8 @@ def _encode_preview_rgb(cropped: Image.Image) -> bytes:
     return buf.getvalue()
 
 
-def _crop_to_preview(
-    jpeg: bytes,
-    title_top_px: int,
-) -> tuple[bytes, int, int] | None:
-    """解码 WGC 输出的 JPEG，裁标题栏与边距；预览边最长宽 PREVIEW_MAX_WIDTH 缩放后再编码。
-    返回的宽高为裁剪后的原始逻辑尺寸（与 `/status` 一致），字节序列为缩放后的图像。"""
+def _decode_and_crop_rgb(jpeg: bytes, title_top_px: int) -> Image.Image | None:
+    """解码 WGC JPEG 并裁客户区（去标题栏与边距），返回 RGB `Image`；失败返回 None。"""
     try:
         img = Image.open(io.BytesIO(jpeg)).convert("RGB")
     except OSError:
@@ -135,10 +131,25 @@ def _crop_to_preview(
     y1 = h - CROP_MARGIN_BOTTOM_PX
     if x1 <= x0 or y1 <= y0:
         return None
-    cropped = img.crop((x0, y0, x1, y1))
+    return img.crop((x0, y0, x1, y1))
+
+
+def _encode_cropped_to_preview(cropped: Image.Image) -> tuple[bytes, int, int]:
+    """将裁剪图按 PREVIEW_MAX_WIDTH 缩小后编码；返回 (字节, 逻辑裁剪宽, 逻辑裁剪高)。"""
     cw, ch = cropped.size
     scaled = _downscale_preview_max_width(cropped, PREVIEW_MAX_WIDTH)
-    raw = _encode_preview_rgb(scaled)
+    return _encode_preview_rgb(scaled), cw, ch
+
+
+def _crop_to_preview(
+    jpeg: bytes,
+    title_top_px: int,
+) -> tuple[bytes, int, int] | None:
+    """解码、裁剪并编码预览；宽高为裁剪后的逻辑尺寸（与 `/status` 一致）。"""
+    cropped = _decode_and_crop_rgb(jpeg, title_top_px)
+    if cropped is None:
+        return None
+    raw, cw, ch = _encode_cropped_to_preview(cropped)
     return raw, cw, ch
 
 
@@ -152,6 +163,22 @@ class CaptureStatus:
     height: int
     fps: float
     preview_mime: str
+    page_match: dict[str, object] | None
+
+
+def _page_match_dict(m: object) -> dict[str, object] | None:
+    """将 `PageMatchResult` 转为可 JSON 序列化的 dict；无匹配返回 None。"""
+    if m is None:
+        return None
+    return {
+        "page_id": getattr(m, "page_id"),
+        "page_label": getattr(m, "label"),
+        "similarity": float(getattr(m, "confidence")),
+        "x": int(getattr(m, "x")),
+        "y": int(getattr(m, "y")),
+        "w": int(getattr(m, "w")),
+        "h": int(getattr(m, "h")),
+    }
 
 
 class CaptureService:
@@ -168,6 +195,8 @@ class CaptureService:
         self._hwnd: int | None = None
         self._size = (0, 0)
         self._live_fps_times: deque[float] = deque()
+        self._page_match: dict[str, object] | None = None
+        self._page_matcher = PageTemplateMatcher()
 
         self._has_wgc = native_backend_available() and sys.platform == "win32"
         self._wgc = WgcHwndStreamer() if (self._has_wgc and WgcHwndStreamer is not None) else None
@@ -209,10 +238,10 @@ class CaptureService:
         with self._lock:
             return self._latest
 
-    def get_preview_with_live_fps(self) -> tuple[bytes, float]:
-        """返回当前预览字节与基于 `_set_frame` 的滑动窗口实测 FPS（帧/秒）。"""
+    def get_preview_with_live_fps(self) -> tuple[bytes, float, dict[str, object] | None]:
+        """返回当前预览字节、滑动窗口实测 FPS、上一帧页面匹配（预览坐标系）。"""
         with self._lock:
-            return self._latest, self._live_fps_unlocked()
+            return self._latest, self._live_fps_unlocked(), self._page_match
 
     def wait_next_frame(self, timeout_s: float) -> bytes:
         """阻塞直到捕获线程写入新帧或超时，返回当前预览字节。"""
@@ -220,11 +249,13 @@ class CaptureService:
             self._frame_ready.wait(timeout=timeout_s)
             return self._latest
 
-    def wait_next_preview_with_live_fps(self, timeout_s: float) -> tuple[bytes, float]:
-        """同 `wait_next_frame`，额外返回当前滑动窗口实测 FPS。"""
+    def wait_next_preview_with_live_fps(
+        self, timeout_s: float
+    ) -> tuple[bytes, float, dict[str, object] | None]:
+        """同 `wait_next_frame`，额外返回 FPS 与页面匹配。"""
         with self._frame_ready:
             self._frame_ready.wait(timeout=timeout_s)
-            return self._latest, self._live_fps_unlocked()
+            return self._latest, self._live_fps_unlocked(), self._page_match
 
     def get_status(self) -> CaptureStatus:
         """返回 UI/API 需要的窗口与 FPS 摘要。"""
@@ -237,6 +268,7 @@ class CaptureService:
                 height=h,
                 fps=self._fps,
                 preview_mime=current_preview_mime(),
+                page_match=self._page_match,
             )
 
     def _live_fps_unlocked(self) -> float:
@@ -253,7 +285,7 @@ class CaptureService:
     def _loop(self) -> None:
         """按 FPS 循环：找窗口 → WGC 快照 → 裁切编码 → 写入 `_latest`。"""
         if sys.platform != "win32" or self._wgc is None:
-            self._set_frame(_placeholder_preview(), None, 0, 0)
+            self._set_frame(_placeholder_preview(), None, 0, 0, None)
             return
 
         from window_capture import find_game_hwnd, window_title_bar_crop_px
@@ -268,29 +300,40 @@ class CaptureService:
             hwnd = find_game_hwnd(self._title_regex)
             if hwnd is None:
                 self._wgc.ensure_hwnd(None, quality=JPEG_QUALITY, min_interval_ms=min_iv)
-                self._set_frame(_placeholder_preview(), None, 0, 0)
+                self._set_frame(_placeholder_preview(), None, 0, 0, None)
             else:
                 self._wgc.ensure_hwnd(hwnd, quality=JPEG_QUALITY, min_interval_ms=min_iv)
                 data, w, h, _ = self._wgc.get_snapshot()
                 if data:
                     chop = window_title_bar_crop_px(hwnd)
-                    out = _crop_to_preview(data, chop)
-                    if out is not None:
-                        data, w, h = out
-                    self._set_frame(data, hwnd, w, h)
+                    cropped = _decode_and_crop_rgb(data, chop)
+                    if cropped is None:
+                        self._set_frame(_placeholder_preview(), hwnd, 0, 0, None)
+                    else:
+                        pm = self._page_matcher.match(cropped, PREVIEW_MAX_WIDTH)
+                        out_data, w, h = _encode_cropped_to_preview(cropped)
+                        self._set_frame(out_data, hwnd, w, h, pm)
                 else:
-                    self._set_frame(_placeholder_preview(), hwnd, 0, 0)
+                    self._set_frame(_placeholder_preview(), hwnd, 0, 0, None)
 
             delay = interval - (time.monotonic() - t_iter)
             if delay > 0:
                 time.sleep(delay)
 
-    def _set_frame(self, raw: bytes, hwnd: int | None, w: int, h: int) -> None:
-        """原子更新最新帧与 HWND、输出尺寸；并记录实测 FPS 样本。"""
+    def _set_frame(
+        self,
+        raw: bytes,
+        hwnd: int | None,
+        w: int,
+        h: int,
+        page_match: object | None,
+    ) -> None:
+        """原子更新最新帧、HWND、逻辑尺寸、页面匹配；并记录实测 FPS 样本。"""
         with self._lock:
             self._latest = raw
             self._hwnd = hwnd
             self._size = (w, h)
+            self._page_match = _page_match_dict(page_match)
             now = time.monotonic()
             self._live_fps_times.append(now)
             while self._live_fps_times and now - self._live_fps_times[0] > LIVE_FPS_WINDOW_S:

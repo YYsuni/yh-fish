@@ -1,37 +1,35 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { type CaptureStatusResponse, getCaptureWsUrl, getCaptureStatus, postCaptureFps } from '../lib/api-client'
+import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type CaptureStatusResponse, type PageMatchPayload, getCaptureWsUrl, getCaptureStatus, postCaptureFps } from '../lib/api-client'
 
 const FPS_MIN = 1
 const FPS_MAX = 60
+/** 二进制帧：`float32 BE` FPS + `uint32 BE` meta UTF-8 字节数 + JSON + 图像 */
+const WS_PREVIEW_HEADER_BYTES = 8
 
-const WS_LIVE_FPS_BYTES = 4
-
-/** 绘制左上角由服务端统计的实测 FPS */
-function drawLiveFpsBadge(ctx: CanvasRenderingContext2D, canvasW: number, liveFps: number) {
-	const margin = Math.max(10, Math.round(canvasW * 0.018))
-	const fontSize = Math.max(14, Math.round(canvasW * 0.034))
-	const label =
-		liveFps < 0.05 ? '— FPS' : `${liveFps >= 10 ? Math.round(liveFps) : liveFps.toFixed(1)} FPS`
-	ctx.save()
-	ctx.font = `600 ${fontSize}px ui-monospace, SFMono-Regular, monospace`
-	const tw = ctx.measureText(label).width
-	const bh = Math.round(fontSize * 1.45)
-	const bw = tw + fontSize * 1.1
-	const x = margin
-	const y = margin
-	ctx.fillStyle = 'rgba(15, 23, 42, 0.75)'
-	if (typeof ctx.roundRect === 'function') {
-		ctx.beginPath()
-		ctx.roundRect(x, y, bw, bh, 8)
-		ctx.fill()
-	} else {
-		ctx.fillRect(x, y, bw, bh)
+function parsePageMatch(raw: unknown): PageMatchPayload {
+	if (raw == null || typeof raw !== 'object') return null
+	const o = raw as Record<string, unknown>
+	const x = Math.round(Number(o.x))
+	const y = Math.round(Number(o.y))
+	const w = Math.max(0, Math.round(Number(o.w)))
+	const h = Math.max(0, Math.round(Number(o.h)))
+	if (![x, y, w, h].every(Number.isFinite)) return null
+	const rawSim = o.similarity ?? o.confidence
+	const similarity = Number(rawSim)
+	return {
+		page_id: String(o.page_id ?? ''),
+		page_label: String(o.page_label ?? ''),
+		similarity: Number.isFinite(similarity) ? similarity : 0,
+		x,
+		y,
+		w,
+		h
 	}
-	ctx.fillStyle = '#f1f5f9'
-	ctx.textBaseline = 'middle'
-	ctx.textAlign = 'left'
-	ctx.fillText(label, x + fontSize * 0.55, y + bh / 2)
-	ctx.restore()
+}
+
+function formatLiveFpsLabel(liveFps: number | null): string {
+	if (liveFps == null || liveFps < 0.05) return '— FPS'
+	return `${liveFps >= 10 ? Math.round(liveFps) : liveFps.toFixed(1)} FPS`
 }
 
 export function CapturePreviewSection() {
@@ -40,6 +38,10 @@ export function CapturePreviewSection() {
 	const [streamKey, setStreamKey] = useState(0)
 	const [fpsDraft, setFpsDraft] = useState(15)
 	const [fpsSaving, setFpsSaving] = useState(false)
+	const [liveFps, setLiveFps] = useState<number | null>(null)
+	const [pageMatch, setPageMatch] = useState<PageMatchPayload>(null)
+	const [matchBoxCss, setMatchBoxCss] = useState<CSSProperties | null>(null)
+	const [layoutTick, setLayoutTick] = useState(0)
 	const fpsSyncedOnce = useRef(false)
 	const canvasRef = useRef<HTMLCanvasElement>(null)
 	const previewMimeRef = useRef('image/jpeg')
@@ -48,6 +50,7 @@ export function CapturePreviewSection() {
 		try {
 			const c = await getCaptureStatus()
 			setCapture(c)
+			setPageMatch(parsePageMatch(c.page_match ?? null))
 			previewMimeRef.current = c.preview_mime
 			if (!fpsSyncedOnce.current) {
 				setFpsDraft(Math.round(c.fps))
@@ -68,6 +71,41 @@ export function CapturePreviewSection() {
 	useEffect(() => {
 		const canvas = canvasRef.current
 		if (!canvas) return
+		const ro = new ResizeObserver(() => setLayoutTick(t => t + 1))
+		ro.observe(canvas)
+		return () => ro.disconnect()
+	}, [streamKey])
+
+	useLayoutEffect(() => {
+		const el = canvasRef.current
+		if (!el || !pageMatch || pageMatch.w <= 0 || pageMatch.h <= 0) {
+			setMatchBoxCss(null)
+			return
+		}
+		const cw = el.clientWidth
+		const ch = el.clientHeight
+		const bw = el.width
+		const bh = el.height
+		if (bw <= 0 || bh <= 0 || cw <= 0 || ch <= 0) {
+			setMatchBoxCss(null)
+			return
+		}
+		const scale = Math.min(cw / bw, ch / bh)
+		const dw = bw * scale
+		const dh = bh * scale
+		const ox = (cw - dw) / 2
+		const oy = (ch - dh) / 2
+		setMatchBoxCss({
+			left: ox + pageMatch.x * scale,
+			top: oy + pageMatch.y * scale,
+			width: pageMatch.w * scale,
+			height: pageMatch.h * scale
+		})
+	}, [pageMatch, layoutTick])
+
+	useEffect(() => {
+		const canvas = canvasRef.current
+		if (!canvas) return
 
 		let cancelled = false
 		const ws = new WebSocket(getCaptureWsUrl())
@@ -84,11 +122,25 @@ export function CapturePreviewSection() {
 				return
 			}
 			const buf = ev.data as ArrayBuffer
-			if (buf.byteLength <= WS_LIVE_FPS_BYTES) return
+			if (buf.byteLength <= WS_PREVIEW_HEADER_BYTES) return
 
 			const view = new DataView(buf)
 			const liveFps = view.getFloat32(0, false)
-			const imageBuf = buf.slice(WS_LIVE_FPS_BYTES)
+			const metaLen = view.getUint32(4, false)
+			if (metaLen > 256 * 1024 || buf.byteLength < WS_PREVIEW_HEADER_BYTES + metaLen) return
+
+			let pm: PageMatchPayload = null
+			if (metaLen > 0) {
+				try {
+					const metaJson = new TextDecoder().decode(buf.slice(WS_PREVIEW_HEADER_BYTES, WS_PREVIEW_HEADER_BYTES + metaLen))
+					const parsed = JSON.parse(metaJson) as { page_match?: unknown }
+					pm = parsePageMatch(parsed.page_match ?? null)
+				} catch {
+					/* ignore */
+				}
+			}
+
+			const imageBuf = buf.slice(WS_PREVIEW_HEADER_BYTES + metaLen)
 
 			const mime = previewMimeRef.current
 			try {
@@ -106,7 +158,10 @@ export function CapturePreviewSection() {
 				ctx.drawImage(bmp, 0, 0)
 				bmp.close()
 
-				drawLiveFpsBadge(ctx, canvas.width, liveFps)
+				if (!cancelled) {
+					setLiveFps(liveFps)
+					setPageMatch(pm)
+				}
 			} catch (e) {
 				if (!cancelled) setError(e instanceof Error ? e.message : String(e))
 			}
@@ -143,9 +198,19 @@ export function CapturePreviewSection() {
 		}
 	}, [fpsDraft, refreshCapture])
 
+	const summaryMatch = pageMatch ?? parsePageMatch(capture?.page_match ?? null)
+
 	return (
 		<section className='mb-8 w-[400px]'>
-			<canvas ref={canvasRef} className='block max-h-[480px] w-full rounded-md bg-slate-100 object-contain' />
+			<div className='relative w-full'>
+				<canvas ref={canvasRef} className='block max-h-[480px] w-full rounded-md bg-slate-100 object-contain' />
+				{matchBoxCss && <div className='pointer-events-none absolute z-9 rounded-sm ring-2 ring-emerald-500/95' style={matchBoxCss} aria-hidden />}
+				<div
+					className='pointer-events-none absolute top-2 left-2 z-10 rounded-lg bg-slate-900/75 px-2.5 py-1 text-xs leading-none font-medium tracking-tight text-slate-100'
+					aria-live='polite'>
+					{formatLiveFpsLabel(liveFps)}
+				</div>
+			</div>
 
 			{error && <p className='mt-5 text-red-500'>{error}</p>}
 
@@ -184,6 +249,15 @@ export function CapturePreviewSection() {
 			</div>
 
 			<div className='mt-5 grid grid-cols-2 gap-3'>
+				<div className='rounded-xl bg-slate-50/90 p-3 ring-1 ring-slate-100 sm:col-span-2'>
+					<p className='text-xs font-medium tracking-wider text-slate-500 uppercase'>OpenCV 页面（预览坐标）</p>
+					<p className='mt-1 text-sm text-slate-900'>{summaryMatch?.page_label || '—'}</p>
+					<p className='mt-1 font-mono text-xs text-slate-600'>
+						{summaryMatch && summaryMatch.w > 0
+							? `x=${summaryMatch.x} y=${summaryMatch.y} w=${summaryMatch.w} h=${summaryMatch.h} · ${summaryMatch.similarity.toFixed(4)}`
+							: '—'}
+					</p>
+				</div>
 				<div className='rounded-xl bg-slate-50/90 p-3 ring-1 ring-slate-100'>
 					<p className='text-xs font-medium tracking-wider text-slate-500 uppercase'>窗口尺寸</p>
 					<p className='mt-1 font-mono text-sm text-slate-900'>{capture && capture.width > 0 ? `${capture.width} × ${capture.height}` : '—'}</p>

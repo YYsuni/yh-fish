@@ -1,3 +1,14 @@
+export type PageMatchPayload = {
+	page_id: string
+	page_label: string
+	/** OpenCV TM_CCOEFF_NORMED 峰值，约 [0,1]；解析时兼容历史字段 confidence */
+	similarity: number
+	x: number
+	y: number
+	w: number
+	h: number
+} | null
+
 export type CaptureStatusResponse = {
 	ok: boolean
 	hwnd: number | null
@@ -5,6 +16,7 @@ export type CaptureStatusResponse = {
 	height: number
 	fps: number
 	preview_mime: string
+	page_match: PageMatchPayload
 }
 
 /** 与当前页面同源；开发时代理由 Vite 转发 WS */

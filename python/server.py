@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import struct
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from capture_service import CaptureService
 
-WS_PREVIEW_FPS_PREFIX = struct.Struct('>f')
+WS_PREVIEW_HEADER = struct.Struct('>fI')  # 实测 FPS + UTF-8 JSON `page_match` 字节长度
 
 
 class SetFpsBody(BaseModel):
@@ -65,6 +66,7 @@ def create_app(
             "height": s.height,
             "fps": s.fps,
             "preview_mime": s.preview_mime,
+            "page_match": s.page_match,
         }
 
     @app.post("/api/capture/fps")
@@ -74,21 +76,30 @@ def create_app(
 
     @app.websocket("/api/capture/ws")
     async def cap_ws(ws: WebSocket) -> None:
-        """预览 WebSocket：首条文本 JSON `mime`；随后每条二进制为 `>f` 实测 FPS + 图像字节。"""
+        """预览 WebSocket：首条文本 JSON `mime`；随后每条二进制为 `>f` FPS + `>I` meta 长度 + JSON + 图像字节。"""
+
+        def pack_preview(pix: bytes, fps: float, page_match: dict[str, object] | None) -> bytes:
+            meta = json.dumps(
+                {"page_match": page_match},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            return WS_PREVIEW_HEADER.pack(fps, len(meta)) + meta + pix
+
         await ws.accept()
         await ws.send_json({"mime": capture.preview_mime()})
         loop = asyncio.get_running_loop()
         try:
-            pix, fps = await loop.run_in_executor(None, capture.get_preview_with_live_fps)
-            await ws.send_bytes(WS_PREVIEW_FPS_PREFIX.pack(fps) + pix)
+            pix, fps, pm = await loop.run_in_executor(None, capture.get_preview_with_live_fps)
+            await ws.send_bytes(pack_preview(pix, fps, pm))
             while True:
                 timeout = capture.mjpeg_sleep_s()
-                pix, fps = await loop.run_in_executor(
+                pix, fps, pm = await loop.run_in_executor(
                     None,
                     capture.wait_next_preview_with_live_fps,
                     timeout,
                 )
-                await ws.send_bytes(WS_PREVIEW_FPS_PREFIX.pack(fps) + pix)
+                await ws.send_bytes(pack_preview(pix, fps, pm))
         except WebSocketDisconnect:
             pass
 

@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "page_priority": [
+    "正在溜鱼页面",
+    "上钩页面",
+    "钓鱼结束页面",
+    "鱼儿溜走页面",
+    "钓鱼准备页面",
+    "开始钓鱼页面",
+    "钓鱼交互页面",
+    "无鱼饵状态"
+  ],
+  "meta": {
+    "description": "page_priority：按需填写与本文件 pages[].label 完全一致的字符串，数组越靠前优先级越高；多页匹配同时成立时按此顺序择优。亦兼容直接写页面的 id（如 fish-hooked）。未出现在数组内的页面视作最低优先级。",
+    "assets_relative_to": "本文件所在目录（与模板 png 同级）"
+  },
+  "pages": [
+    {
+      "id": "reeling",
+      "label": "正在溜鱼页面",
+      "match_mode": "any",
+      "features": [
+        {
+          "file": "溜鱼条.png",
+          "region": [383.74, 94.16, 509.86, 16.58]
+        }
+      ]
+    },
+    {
+      "id": "start-fishing",
+      "label": "开始钓鱼页面",
+      "match_mode": "any",
+      "features": [
+        {
+          "file": "向右溜鱼.png",
+          "region": [1182.08, 441.63, 54.68, 22.37]
+        }
+      ]
+    },
+    {
+      "id": "fishing-prep",
+      "label": "钓鱼准备页面",
+      "match_mode": "any",
+      "features": [
+        {
+          "file": "开始钓鱼.png",
+          "region": [1026, 668, 111, 30]
+        },
+        {
+          "file": "钓鱼准备.png",
+          "region": [833, 102, 100, 40]
+        }
+      ]
+    },
+    {
+      "id": "fishing-end",
+      "label": "钓鱼结束页面",
+      "match_mode": "any",
+      "features": [
+        {
+          "file": "点击空白区域关闭.png",
+          "region": [560, 688.99, 165, 31]
+        }
+      ]
+    },
+    {
+      "id": "fishing-interact",
+      "label": "钓鱼交互页面",
+      "match_mode": "any",
+      "features": [
+        {
+          "file": "钓鱼.png",
+          "region": [775, 428.99, 69, 31]
+        }
+      ]
+    },
+    {
+      "id": "fish-hooked",
+      "label": "上钩页面",
+      "match_mode": "any",
+      "features": [
+        {
+          "file": "鱼儿上钩了.png",
+          "region": [506, 207, 286, 39]
+        }
+      ]
+    },
+    {
+      "id": "fish-escaped",
+      "label": "鱼儿溜走页面",
+      "match_mode": "any",
+      "features": [
+        {
+          "file": "鱼儿溜走了.png",
+          "region": [576, 393.99, 129, 40]
+        }
+      ]
+    },
+    {
+      "id": "no-bait",
+      "label": "无鱼饵状态",
+      "match_mode": "any",
+      "features": [
+        {
+          "file": "鱼饵才可以钓鱼.png",
+          "region": [506, 387.99, 270, 49]
+        }
+      ]
+    }
+  
+  ]
+}
