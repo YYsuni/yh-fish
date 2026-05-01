@@ -16,14 +16,17 @@ from server import create_app
 
 
 def root() -> Path:
+    """仓库根目录。"""
     return Path(__file__).resolve().parents[1]
 
 
 def dist() -> Path:
+    """前端构建产物目录（Vite `pnpm build` 输出）。"""
     return root() / "frontend" / "dist"
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """解析命令行参数。"""
     p = argparse.ArgumentParser(description="yh-fish")
     p.add_argument("--dev", action="store_true", help="加载 Vite（需另开 pnpm dev）")
     p.add_argument("--url", default="http://localhost:5173", help="--dev 时地址")
@@ -33,6 +36,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """后台启动 FastAPI，再打开桌面 WebView 加载前端。"""
     args = parse_args(sys.argv[1:] if argv is None else argv)
     d = dist()
     static = not args.dev

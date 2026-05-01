@@ -4,10 +4,8 @@ export type CaptureStatusResponse = {
 	width: number
 	height: number
 	fps: number
-	message: string
 }
 
-/** 开发模式直连 8848，避免 Vite 代理缓冲 MJPEG 长连接 */
 export function getCaptureMjpegUrl(): string {
 	const base = import.meta.env.DEV ? 'http://127.0.0.1:8848' : ''
 	return `${base}/api/capture/mjpeg`

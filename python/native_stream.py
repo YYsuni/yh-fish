@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+"""Windows.Graphics.Capture（windows_capture）：按 HWND 异步抓帧并编码为 JPEG。"""
+
 from __future__ import annotations
 
 import io
@@ -10,6 +12,7 @@ from PIL import Image
 
 
 def native_backend_available() -> bool:
+    """当前进程能否导入 `windows_capture`（仅 Win32 有意义）。"""
     import sys
 
     if sys.platform != "win32":
@@ -22,6 +25,7 @@ def native_backend_available() -> bool:
 
 
 class WgcHwndStreamer:
+    """封装单 HWND 的 WGC 捕获线程，维护最近一次 JPEG 快照。"""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -32,6 +36,7 @@ class WgcHwndStreamer:
         self._cap = None
 
     def get_snapshot(self) -> tuple[bytes | None, int, int, str | None]:
+        """取出最近一次编码成功的 JPEG 及宽高；无帧时 data 为 None。"""
         with self._lock:
             err = self._err
             if self._latest is None:
@@ -40,12 +45,14 @@ class WgcHwndStreamer:
             return data, w, h, err
 
     def shutdown(self) -> None:
+        """停止捕获并清空缓存。"""
         self._stop_inner()
         with self._lock:
             self._latest = None
             self._err = None
 
     def ensure_hwnd(self, hwnd: int | None, *, quality: int, min_interval_ms: float) -> None:
+        """切换或清空目标窗口；同一 HWND 且已在跑则不变。"""
         if hwnd is None or int(hwnd) <= 0:
             self._stop_inner()
             with self._lock:
@@ -67,6 +74,7 @@ class WgcHwndStreamer:
                 self._active_hwnd = None
 
     def _stop_inner(self) -> None:
+        """停止当前 WindowsCapture 控制对象。"""
         c = self._control
         self._control = None
         self._cap = None
@@ -80,6 +88,7 @@ class WgcHwndStreamer:
             pass
 
     def _start_for_hwnd(self, hwnd: int, *, quality: int, min_interval_ms: float) -> None:
+        """为指定 HWND 启动自由线程捕获，在帧回调里节流编码 JPEG。"""
         from windows_capture import WindowsCapture
 
         cap = WindowsCapture(window_hwnd=hwnd, cursor_capture=False, draw_border=False)
@@ -87,10 +96,12 @@ class WgcHwndStreamer:
 
         @cap.event
         def on_closed() -> None:
+            """捕获会话关闭（占位，无需处理）。"""
             return
 
         @cap.event
         def on_frame_arrived(frame, _internal_capture_control):  # noqa: F841
+            """新帧到达：按最小间隔将 BGRA 缓冲转为 JPEG 写入 `_latest`。"""
             now = time.monotonic()
             if (now - last_encode[0]) * 1000.0 < min_interval_ms:
                 return
