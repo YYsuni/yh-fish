@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 
 DEFAULT_PAGES_JSON = Path(__file__).resolve().parent / "images" / "auto_fish" / "pages.json"
-DEFAULT_MATCH_THRESHOLD = 0.78
+DEFAULT_MATCH_THRESHOLD = 0.5
 # pages.json 的 region 基于“未裁剪前整窗截图”的坐标；捕获时会默认裁掉这些边缘。
 DEFAULT_PRE_CROP_TOP_PX = 52
 DEFAULT_PRE_CROP_LEFT_PX = 2
@@ -32,6 +32,9 @@ class PageMatchResult:
 
 @dataclass(frozen=True)
 class _FeatureTemplate:
+    """`region_cropped` 为游戏画面裁剪坐标系下的搜索矩形；`tpl_rgb` 为整张模板 PNG（在 ROI 内匹配）。"""
+
+    region_cropped: tuple[int, int, int, int]
     tpl_rgb: np.ndarray
 
 
@@ -79,15 +82,6 @@ def _crop_rgb_by_rect(
     return out
 
 
-def _as_float_or_none(v: object) -> float | None:
-    if v is None:
-        return None
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None
-
-
 def _match_one_feature(
     scene_rgb: np.ndarray,
     tpl_rgb: np.ndarray,
@@ -101,6 +95,23 @@ def _match_one_feature(
     _min_v, max_v, _min_loc, max_loc = cv2.minMaxLoc(res)
     mx, my = max_loc
     return (mx, my, tw, th, float(max_v))
+
+
+def _match_template_in_roi(
+    scene_rgb: np.ndarray,
+    region: tuple[int, int, int, int],
+    tpl_rgb: np.ndarray,
+) -> tuple[int, int, int, int, float] | None:
+    """在 `scene_rgb` 的 region ROI 内对 `tpl_rgb` 做模板匹配；返回 (全局 x, 全局 y, w, h, score)。"""
+    rx, ry, rw, rh = region
+    roi = _crop_rgb_by_rect(scene_rgb, region)
+    if roi is None:
+        return None
+    loc = _match_one_feature(roi, tpl_rgb)
+    if loc is None:
+        return None
+    mx, my, tw, th, cf = loc
+    return (rx + mx, ry + my, tw, th, cf)
 
 
 class PageTemplateMatcher:
@@ -180,19 +191,21 @@ class PageTemplateMatcher:
                 # pages.json 的 region 基于“未裁剪前整窗截图”，需要先减去捕获侧默认裁剪量
                 # 以对齐 `CaptureService` 传入的 cropped_rgb 坐标系。
                 try:
-                    rect = _apply_pre_crop_offset(
+                    rect_adj = _apply_pre_crop_offset(
                         rect,
                         left_px=self._pre_crop_left_px,
                         top_px=self._pre_crop_top_px,
                     )
+                    rx, ry, rw, rh = (int(round(float(v))) for v in rect_adj)
                 except (TypeError, ValueError):
                     continue
-                g = _crop_rgb_by_rect(arr, rect)
-                if g is None:
+                th_tpl, tw_tpl = int(arr.shape[0]), int(arr.shape[1])
+                if tw_tpl > rw or th_tpl > rh:
                     continue
                 tpl_entries.append(
                     _FeatureTemplate(
-                        tpl_rgb=g,
+                        region_cropped=(rx, ry, rw, rh),
+                        tpl_rgb=arr,
                     )
                 )
             if tpl_entries:
@@ -229,7 +242,7 @@ class PageTemplateMatcher:
         self._ensure_loaded()
 
     def match(self, cropped_rgb: Image.Image) -> PageMatchResult | None:
-        """在裁剪后的客户区 RGB 上与模板比对；返回的矩形为裁剪坐标系像素（未经预览缩小）。"""
+        """在各特征的 region ROI 内对整张模板 PNG 做匹配；返回的矩形为裁剪坐标系像素（未经预览缩小）。"""
         self._ensure_loaded()
         if not self._templates_by_pid:
             return None
@@ -253,10 +266,7 @@ class PageTemplateMatcher:
                 per: list[tuple[int, int, int, int, float]] = []
                 ok = True
                 for ft in feats:
-                    r = _match_one_feature(
-                        scene,
-                        ft.tpl_rgb,
-                    )
+                    r = _match_template_in_roi(scene, ft.region_cropped, ft.tpl_rgb)
                     if r is None or r[4] < th_val:
                         ok = False
                         break
@@ -274,10 +284,7 @@ class PageTemplateMatcher:
             else:
                 hits: list[tuple[int, int, int, int, float]] = []
                 for ft in feats:
-                    r = _match_one_feature(
-                        scene,
-                        ft.tpl_rgb,
-                    )
+                    r = _match_template_in_roi(scene, ft.region_cropped, ft.tpl_rgb)
                     if r is None:
                         continue
                     x_, y_, w_, h_, conf = r
