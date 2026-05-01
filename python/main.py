@@ -1,0 +1,71 @@
+# -*- coding: utf-8 -*-
+
+from __future__ import annotations
+
+import argparse
+import sys
+import threading
+import time
+from pathlib import Path
+
+import uvicorn
+import webview
+
+from capture_service import CaptureService
+from engine import FishingEngine
+from server import create_app
+
+
+def root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def dist() -> Path:
+    return root() / "frontend" / "dist"
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="yh-fish")
+    p.add_argument("--dev", action="store_true", help="加载 Vite（需另开 pnpm dev）")
+    p.add_argument("--url", default="http://localhost:5173", help="--dev 时地址")
+    p.add_argument("--host", default="localhost")
+    p.add_argument("--port", type=int, default=8848)
+    return p.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    d = dist()
+    static = not args.dev
+
+    if static and not d.is_dir():
+        print(
+            f"缺少 {d}\ncd frontend && pnpm i && pnpm build\n或 python python/main.py --dev",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    eng = FishingEngine()
+    cap = CaptureService()
+    app = create_app(engine=eng, capture=cap, serve_static=static, dist_dir=d)
+
+    srv = uvicorn.Server(
+        uvicorn.Config(app, host=args.host, port=args.port, log_level="info", access_log=False)
+    )
+    threading.Thread(target=srv.run, daemon=True).start()
+    time.sleep(0.35)
+
+    url = args.url if args.dev else f"http://{args.host}:{args.port}"
+    webview.create_window(
+        "异环钓鱼", url, width=920, height=720, min_size=(480, 520), resizable=True
+    )
+
+    try:
+        webview.start()
+    except KeyboardInterrupt:
+        eng.stop()
+        srv.should_exit = True
+
+
+if __name__ == "__main__":
+    main()
