@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,11 +32,35 @@ class PageMatchResult:
 
 
 @dataclass(frozen=True)
+class PageMatchEnvelope:
+    """`result` 为当前帧择优后的整页匹配；`template_debug` 为配置了 `features[].debug=true` 的模板调试快照。"""
+
+    result: PageMatchResult | None
+    template_debug: tuple[dict[str, object], ...] = ()
+
+
+def _rgb_to_jpeg_base64(rgb: np.ndarray, *, quality: int = 82) -> str:
+    """RGB uint8 HxWx3 → JPEG Base64 ASCII；失败返回空串。"""
+    if rgb.ndim != 3 or rgb.shape[2] != 3 or rgb.size == 0:
+        return ""
+    try:
+        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        ok, buf = cv2.imencode(".jpg", bgr, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+    except Exception:
+        return ""
+    if not ok or buf is None:
+        return ""
+    return base64.b64encode(buf.tobytes()).decode("ascii")
+
+
+@dataclass(frozen=True)
 class _FeatureTemplate:
     """`region_cropped` 为游戏画面裁剪坐标系下的搜索矩形；`tpl_rgb` 为整张模板 PNG（在 ROI 内匹配）。"""
 
     region_cropped: tuple[int, int, int, int]
     tpl_rgb: np.ndarray
+    template_file: str
+    debug: bool
 
 
 def _apply_pre_crop_offset(
@@ -206,6 +231,8 @@ class PageTemplateMatcher:
                     _FeatureTemplate(
                         region_cropped=(rx, ry, rw, rh),
                         tpl_rgb=arr,
+                        template_file=str(fn).strip(),
+                        debug=bool(f.get("debug")),
                     )
                 )
             if tpl_entries:
@@ -214,9 +241,9 @@ class PageTemplateMatcher:
 
         # page_priority 支持写 label 或 id：构建反向映射用于解析与排序
         label_to_pid: dict[str, str] = {}
-        for p, (lab, _mode, _feats) in loaded.items():
+        for pid, (lab, _mode, _feats) in loaded.items():
             if lab and lab not in label_to_pid:
-                label_to_pid[lab] = p
+                label_to_pid[lab] = pid
 
         priority_rank: dict[str, int] = {}
         rank = 0
@@ -252,8 +279,8 @@ class PageTemplateMatcher:
         self._templates_by_pid = {}
         self._ensure_loaded()
 
-    def match(self, cropped_rgb: Image.Image) -> PageMatchResult | None:
-        """在各特征的 region ROI 内对整张模板 PNG 做匹配；返回的矩形为裁剪坐标系像素（未经预览缩小）。"""
+    def match(self, cropped_rgb: Image.Image) -> PageMatchEnvelope | None:
+        """在各特征的 region ROI 内对整张模板 PNG 做匹配；矩形为裁剪坐标系像素；附带 `debug` 特征快照。"""
         self._ensure_loaded()
         if not self._templates_by_pid:
             return None
@@ -266,9 +293,31 @@ class PageTemplateMatcher:
             return None
         th_val = self._threshold
 
-        def _rank(pid: str) -> int:
+        dbg_rows: list[dict[str, object]] = []
+        for pid, (label, _mode, feats) in self._templates_by_pid.items():
+            for ft in feats:
+                if not ft.debug:
+                    continue
+                rx, ry, rw, rh = ft.region_cropped
+                roi = _crop_rgb_by_rect(scene, ft.region_cropped)
+                mt = _match_template_in_roi(scene, ft.region_cropped, ft.tpl_rgb)
+                sim = float(mt[4]) if mt else 0.0
+                dbg_rows.append(
+                    {
+                        "page_id": pid,
+                        "page_label": label,
+                        "template_file": ft.template_file,
+                        "similarity": sim,
+                        "region": [int(rx), int(ry), int(rw), int(rh)],
+                        "roi_jpeg_base64": _rgb_to_jpeg_base64(roi) if roi is not None else "",
+                        "template_jpeg_base64": _rgb_to_jpeg_base64(ft.tpl_rgb),
+                    }
+                )
+        dbg_tuple = tuple(dbg_rows)
+
+        def _rank(pg_id: str) -> int:
             # 未出现在 priority 中的页面视作最低优先级
-            return self._priority_rank.get(pid, len(self._priority_rank) + 10_000)
+            return self._priority_rank.get(pg_id, len(self._priority_rank) + 10_000)
 
         candidates: list[tuple[float, str, str, int, int, int, int]] = []
 
@@ -309,19 +358,24 @@ class PageTemplateMatcher:
             candidates.append(cand)
 
         if not candidates:
-            return None
+            if not dbg_tuple:
+                return None
+            return PageMatchEnvelope(result=None, template_debug=dbg_tuple)
 
         # 先看 `page_priority` 顺序（越靠前越高），同级再取置信度最高
         _conf, pid, label, bx, by, bw, bh = min(
             candidates,
             key=lambda c: (_rank(c[1]), -c[0]),
         )
-        return PageMatchResult(
-            page_id=pid,
-            label=label,
-            confidence=float(_conf),
-            x=int(bx),
-            y=int(by),
-            w=int(bw),
-            h=int(bh),
+        return PageMatchEnvelope(
+            result=PageMatchResult(
+                page_id=pid,
+                label=label,
+                confidence=float(_conf),
+                x=int(bx),
+                y=int(by),
+                w=int(bw),
+                h=int(bh),
+            ),
+            template_debug=dbg_tuple,
         )

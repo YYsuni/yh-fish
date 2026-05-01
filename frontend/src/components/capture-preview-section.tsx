@@ -2,6 +2,7 @@ import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, us
 import {
 	type CaptureStatusResponse,
 	type PageMatchPayload,
+	type TemplateDebugEntry,
 	getCaptureWsUrl,
 	getCaptureStatus,
 	postCaptureFps,
@@ -15,6 +16,30 @@ const MATCH_TH_MAX = 1
 /** 二进制帧：`float32 BE` FPS + `uint32 BE` meta UTF-8 字节数 + JSON + 图像 */
 const WS_PREVIEW_HEADER_BYTES = 8
 
+function parseTemplateDebug(raw: unknown): TemplateDebugEntry[] {
+	if (!Array.isArray(raw)) return []
+	const out: TemplateDebugEntry[] = []
+	for (const item of raw) {
+		if (item == null || typeof item !== 'object') continue
+		const r = item as Record<string, unknown>
+		const reg = r.region
+		if (!Array.isArray(reg) || reg.length !== 4) continue
+		const coords = reg.map(v => Math.round(Number(v))) as [number, number, number, number]
+		if (!coords.every(Number.isFinite)) continue
+		const sim = Number(r.similarity)
+		out.push({
+			page_id: String(r.page_id ?? ''),
+			page_label: String(r.page_label ?? ''),
+			template_file: String(r.template_file ?? ''),
+			similarity: Number.isFinite(sim) ? sim : 0,
+			region: coords,
+			roi_jpeg_base64: String(r.roi_jpeg_base64 ?? ''),
+			template_jpeg_base64: String(r.template_jpeg_base64 ?? '')
+		})
+	}
+	return out
+}
+
 function parsePageMatch(raw: unknown): PageMatchPayload {
 	if (raw == null || typeof raw !== 'object') return null
 	const o = raw as Record<string, unknown>
@@ -25,7 +50,8 @@ function parsePageMatch(raw: unknown): PageMatchPayload {
 	if (![x, y, w, h].every(Number.isFinite)) return null
 	const rawSim = o.similarity ?? o.confidence
 	const similarity = Number(rawSim)
-	return {
+	const template_debug = parseTemplateDebug(o.template_debug)
+	const base: Exclude<PageMatchPayload, null> = {
 		page_id: String(o.page_id ?? ''),
 		page_label: String(o.page_label ?? ''),
 		similarity: Number.isFinite(similarity) ? similarity : 0,
@@ -34,6 +60,8 @@ function parsePageMatch(raw: unknown): PageMatchPayload {
 		w,
 		h
 	}
+	if (template_debug.length) base.template_debug = template_debug
+	return base
 }
 
 function formatLiveFpsLabel(liveFps: number | null): string {
@@ -257,12 +285,12 @@ export function CapturePreviewSection() {
 		<section className='mb-8 w-[400px]'>
 			<div className='relative w-full'>
 				<canvas ref={canvasRef} className='block max-h-[480px] w-full rounded-md bg-slate-100 object-contain' />
-				{matchBoxCss && <div className='pointer-events-none absolute z-9 rounded-sm ring-2 ring-emerald-500/95' style={matchBoxCss} aria-hidden />}
 				<div
 					className='pointer-events-none absolute top-2 left-2 z-10 rounded-lg bg-slate-900/75 px-2.5 py-1 text-xs leading-none font-medium tracking-tight text-slate-100'
 					aria-live='polite'>
 					{formatLiveFpsLabel(liveFps)}
 				</div>
+				{matchBoxCss && <div className='pointer-events-none absolute z-9 rounded-xs ring-1 ring-red-600' style={matchBoxCss} aria-hidden />}
 			</div>
 
 			{error && <p className='mt-5 text-red-500'>{error}</p>}
@@ -301,7 +329,7 @@ export function CapturePreviewSection() {
 				</div>
 				<div className='flex flex-col gap-1'>
 					<label htmlFor='capture-match-th' className='text-xs font-medium text-slate-500'>
-						模板匹配阈值（0–1，越高越苛刻）
+						页面匹配阈值（0–1）
 					</label>
 					<div className='flex items-center gap-2'>
 						<input
@@ -335,19 +363,66 @@ export function CapturePreviewSection() {
 			</div>
 
 			<div className='mt-5 grid grid-cols-2 gap-3'>
-				<div className='rounded-xl bg-slate-50/90 p-3 ring-1 ring-slate-100 sm:col-span-2'>
+				<div className='rounded-xl bg-slate-50/90 p-3 ring-1 ring-slate-100'>
 					<p className='text-xs font-medium tracking-wider text-slate-500 uppercase'>页面识别</p>
 					<p className='mt-1 text-sm text-slate-900'>{summaryMatch?.page_label || '—'}</p>
 					<p className='mt-1 font-mono text-xs text-slate-600'>
 						{summaryMatch && summaryMatch.w > 0 ? `x=${summaryMatch.x} y=${summaryMatch.y} w=${summaryMatch.w} h=${summaryMatch.h}` : '—'}
 					</p>
-					<p className='mt-1 font-mono text-xs text-slate-600'>相似度：{summaryMatch.similarity.toFixed(4)}</p>
+					<p className='mt-1 font-mono text-xs text-slate-600'>相似度：{summaryMatch?.similarity.toFixed(4)}</p>
 				</div>
 				<div className='rounded-xl bg-slate-50/90 p-3 ring-1 ring-slate-100'>
 					<p className='text-xs font-medium tracking-wider text-slate-500 uppercase'>窗口尺寸</p>
 					<p className='mt-1 font-mono text-sm text-slate-900'>{capture && capture.width > 0 ? `${capture.width} × ${capture.height}` : '—'}</p>
 				</div>
 			</div>
+
+			{summaryMatch?.template_debug && summaryMatch.template_debug.length > 0 ? (
+				<div className='mt-5 space-y-3'>
+					<p className='text-xs font-medium tracking-wider text-slate-500 uppercase'>调试 ROI / 模板</p>
+					{summaryMatch.template_debug.map((d, i) => (
+						<div
+							key={`${d.template_file}-${d.region.join(',')}-${i}`}
+							className='rounded-xl bg-slate-50/90 p-3 ring-1 ring-slate-100'>
+							<p className='text-xs text-slate-700'>
+								<span className='font-medium text-slate-900'>{d.page_label}</span>
+								<span className='text-slate-400'> · </span>
+								{d.template_file}
+							</p>
+							<p className='mt-1 font-mono text-xs text-slate-600'>
+								ROI [x,y,w,h] = {d.region.join(', ')} · 匹配度（TM_CCOEFF_NORMED）：
+								<span className='tabular-nums text-slate-900'>{d.similarity.toFixed(4)}</span>
+							</p>
+							<div className='mt-2 grid grid-cols-2 gap-2'>
+								<div>
+									<p className='mb-1 text-[10px] font-medium text-slate-500 uppercase'>裁剪区域</p>
+									{d.roi_jpeg_base64 ? (
+										<img
+											src={`data:image/jpeg;base64,${d.roi_jpeg_base64}`}
+											alt=''
+											className='max-h-32 w-full rounded-md bg-white object-contain ring-1 ring-slate-200'
+										/>
+									) : (
+										<p className='text-xs text-slate-400'>无 ROI 图</p>
+									)}
+								</div>
+								<div>
+									<p className='mb-1 text-[10px] font-medium text-slate-500 uppercase'>匹配模板</p>
+									{d.template_jpeg_base64 ? (
+										<img
+											src={`data:image/jpeg;base64,${d.template_jpeg_base64}`}
+											alt=''
+											className='max-h-32 w-full rounded-md bg-white object-contain ring-1 ring-slate-200'
+										/>
+									) : (
+										<p className='text-xs text-slate-400'>无模板图</p>
+									)}
+								</div>
+							</div>
+						</div>
+					))}
+				</div>
+			) : null}
 		</section>
 	)
 }

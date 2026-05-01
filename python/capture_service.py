@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from PIL import Image
 
-from page_template_match import PageTemplateMatcher
+from page_template_match import PageMatchEnvelope, PageTemplateMatcher
 
 if sys.platform == "win32":
     from native_stream import WgcHwndStreamer, native_backend_available
@@ -167,19 +167,37 @@ class CaptureStatus:
     page_match_threshold: float
 
 
-def _page_match_dict(m: object) -> dict[str, object] | None:
-    """将 `PageMatchResult` 转为可 JSON 序列化的 dict；无匹配返回 None。"""
-    if m is None:
+def _serialize_page_match(env: PageMatchEnvelope | None) -> dict[str, object] | None:
+    """将 `PageMatchEnvelope` 转为可 JSON 序列化的 dict；无页面匹配且无 debug 条目时返回 None。"""
+    if env is None:
         return None
-    return {
-        "page_id": getattr(m, "page_id"),
-        "page_label": getattr(m, "label"),
-        "similarity": float(getattr(m, "confidence")),
-        "x": int(getattr(m, "x")),
-        "y": int(getattr(m, "y")),
-        "w": int(getattr(m, "w")),
-        "h": int(getattr(m, "h")),
+    td = list(env.template_debug)
+    r = env.result
+    if r is None:
+        if not td:
+            return None
+        return {
+            "page_id": "",
+            "page_label": "",
+            "similarity": 0.0,
+            "x": 0,
+            "y": 0,
+            "w": 0,
+            "h": 0,
+            "template_debug": td,
+        }
+    row: dict[str, object] = {
+        "page_id": r.page_id,
+        "page_label": r.label,
+        "similarity": float(r.confidence),
+        "x": int(r.x),
+        "y": int(r.y),
+        "w": int(r.w),
+        "h": int(r.h),
     }
+    if td:
+        row["template_debug"] = td
+    return row
 
 
 class CaptureService:
@@ -255,9 +273,7 @@ class CaptureService:
             self._frame_ready.wait(timeout=timeout_s)
             return self._latest
 
-    def wait_next_preview_with_live_fps(
-        self, timeout_s: float
-    ) -> tuple[bytes, float, dict[str, object] | None, int, int]:
+    def wait_next_preview_with_live_fps(self, timeout_s: float) -> tuple[bytes, float, dict[str, object] | None, int, int]:
         """同 `wait_next_frame`，额外返回 FPS、页面匹配与同帧裁剪尺寸。"""
         with self._frame_ready:
             self._frame_ready.wait(timeout=timeout_s)
@@ -334,14 +350,14 @@ class CaptureService:
         hwnd: int | None,
         w: int,
         h: int,
-        page_match: object | None,
+        page_match: PageMatchEnvelope | None,
     ) -> None:
         """原子更新最新帧、HWND、逻辑尺寸、页面匹配；并记录实测 FPS 样本。"""
         with self._lock:
             self._latest = raw
             self._hwnd = hwnd
             self._size = (w, h)
-            self._page_match = _page_match_dict(page_match)
+            self._page_match = _serialize_page_match(page_match)
             now = time.monotonic()
             self._live_fps_times.append(now)
             while self._live_fps_times and now - self._live_fps_times[0] > LIVE_FPS_WINDOW_S:

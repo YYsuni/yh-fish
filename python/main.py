@@ -51,16 +51,12 @@ def main(argv: list[str] | None = None) -> None:
     cap = CaptureService()
     app = create_app(capture=cap, serve_static=static, dist_dir=d)
 
-    srv = uvicorn.Server(
-        uvicorn.Config(app, host=args.host, port=args.port, log_level="info", access_log=False)
-    )
+    srv = uvicorn.Server(uvicorn.Config(app, host=args.host, port=args.port, log_level="info", access_log=False))
     threading.Thread(target=srv.run, daemon=True).start()
     time.sleep(0.35)
 
     url = args.url if args.dev else f"http://{args.host}:{args.port}"
-    webview.create_window(
-        "异环钓鱼", url, width=600, height=600, min_size=(480, 520), resizable=True
-    )
+    webview.create_window("异环钓鱼", url, width=600, height=600, min_size=(480, 520), resizable=True)
 
     try:
         webview.start()
