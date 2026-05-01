@@ -1,17 +1,5 @@
-export type RuntimeStatusResponse = {
-	state: string
-	message: string
-	tick: number
-}
-
-export type HealthResponse = {
-	ok: boolean
-	version: string
-}
-
 export type CaptureStatusResponse = {
 	ok: boolean
-	title_regex: string
 	hwnd: number | null
 	width: number
 	height: number
@@ -40,32 +28,13 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 	return (await res.json()) as T
 }
 
-export function getHealth() {
-	return fetchJson<HealthResponse>('/api/health')
-}
-
-export function getRuntimeStatus() {
-	return fetchJson<RuntimeStatusResponse>('/api/runtime/status')
-}
-
-export function postRuntimeStart() {
-	return fetchJson<{ accepted: boolean; already_running: boolean }>('/api/runtime/start', { method: 'POST', body: '{}' })
-}
-
-export function postRuntimeStop() {
-	return fetchJson<{ accepted: boolean }>('/api/runtime/stop', {
-		method: 'POST',
-		body: '{}'
-	})
-}
-
 export function getCaptureStatus() {
 	return fetchJson<CaptureStatusResponse>('/api/capture/status')
 }
 
-export function postCaptureConfig(titleRegex: string) {
-	return fetchJson<{ title_regex: string }>('/api/capture/config', {
+export function postCaptureFps(fps: number) {
+	return fetchJson<{ fps: number }>('/api/capture/fps', {
 		method: 'POST',
-		body: JSON.stringify({ title_regex: titleRegex })
+		body: JSON.stringify({ fps })
 	})
 }

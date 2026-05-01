@@ -12,7 +12,6 @@ import uvicorn
 import webview
 
 from capture_service import CaptureService
-from engine import FishingEngine
 from server import create_app
 
 
@@ -45,9 +44,8 @@ def main(argv: list[str] | None = None) -> None:
         )
         sys.exit(1)
 
-    eng = FishingEngine()
     cap = CaptureService()
-    app = create_app(engine=eng, capture=cap, serve_static=static, dist_dir=d)
+    app = create_app(capture=cap, serve_static=static, dist_dir=d)
 
     srv = uvicorn.Server(
         uvicorn.Config(app, host=args.host, port=args.port, log_level="info", access_log=False)
@@ -63,7 +61,6 @@ def main(argv: list[str] | None = None) -> None:
     try:
         webview.start()
     except KeyboardInterrupt:
-        eng.stop()
         srv.should_exit = True
 
 
