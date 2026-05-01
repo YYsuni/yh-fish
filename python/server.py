@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from capture_service import CaptureService
 
-WS_PREVIEW_HEADER = struct.Struct('>fI')  # 实测 FPS + UTF-8 JSON `page_match` 字节长度
+WS_PREVIEW_HEADER = struct.Struct('>fI')  # 实测 FPS + UTF-8 JSON meta（page_match、crop 尺寸）字节长度
 
 
 class SetFpsBody(BaseModel):
@@ -78,9 +78,15 @@ def create_app(
     async def cap_ws(ws: WebSocket) -> None:
         """预览 WebSocket：首条文本 JSON `mime`；随后每条二进制为 `>f` FPS + `>I` meta 长度 + JSON + 图像字节。"""
 
-        def pack_preview(pix: bytes, fps: float, page_match: dict[str, object] | None) -> bytes:
+        def pack_preview(
+            pix: bytes,
+            fps: float,
+            page_match: dict[str, object] | None,
+            crop_w: int,
+            crop_h: int,
+        ) -> bytes:
             meta = json.dumps(
-                {"page_match": page_match},
+                {"page_match": page_match, "crop_width": crop_w, "crop_height": crop_h},
                 ensure_ascii=False,
                 separators=(",", ":"),
             ).encode("utf-8")
@@ -90,16 +96,16 @@ def create_app(
         await ws.send_json({"mime": capture.preview_mime()})
         loop = asyncio.get_running_loop()
         try:
-            pix, fps, pm = await loop.run_in_executor(None, capture.get_preview_with_live_fps)
-            await ws.send_bytes(pack_preview(pix, fps, pm))
+            pix, fps, pm, cw, ch = await loop.run_in_executor(None, capture.get_preview_with_live_fps)
+            await ws.send_bytes(pack_preview(pix, fps, pm, cw, ch))
             while True:
                 timeout = capture.mjpeg_sleep_s()
-                pix, fps, pm = await loop.run_in_executor(
+                pix, fps, pm, cw, ch = await loop.run_in_executor(
                     None,
                     capture.wait_next_preview_with_live_fps,
                     timeout,
                 )
-                await ws.send_bytes(pack_preview(pix, fps, pm))
+                await ws.send_bytes(pack_preview(pix, fps, pm, cw, ch))
         except WebSocketDisconnect:
             pass
 

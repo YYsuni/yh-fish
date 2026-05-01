@@ -238,10 +238,11 @@ class CaptureService:
         with self._lock:
             return self._latest
 
-    def get_preview_with_live_fps(self) -> tuple[bytes, float, dict[str, object] | None]:
-        """返回当前预览字节、滑动窗口实测 FPS、上一帧页面匹配（预览坐标系）。"""
+    def get_preview_with_live_fps(self) -> tuple[bytes, float, dict[str, object] | None, int, int]:
+        """返回预览字节、FPS、页面匹配（裁剪后坐标）；以及同上帧一致的裁剪宽高。"""
         with self._lock:
-            return self._latest, self._live_fps_unlocked(), self._page_match
+            cw, ch = self._size
+            return self._latest, self._live_fps_unlocked(), self._page_match, cw, ch
 
     def wait_next_frame(self, timeout_s: float) -> bytes:
         """阻塞直到捕获线程写入新帧或超时，返回当前预览字节。"""
@@ -251,11 +252,12 @@ class CaptureService:
 
     def wait_next_preview_with_live_fps(
         self, timeout_s: float
-    ) -> tuple[bytes, float, dict[str, object] | None]:
-        """同 `wait_next_frame`，额外返回 FPS 与页面匹配。"""
+    ) -> tuple[bytes, float, dict[str, object] | None, int, int]:
+        """同 `wait_next_frame`，额外返回 FPS、页面匹配与同帧裁剪尺寸。"""
         with self._frame_ready:
             self._frame_ready.wait(timeout=timeout_s)
-            return self._latest, self._live_fps_unlocked(), self._page_match
+            cw, ch = self._size
+            return self._latest, self._live_fps_unlocked(), self._page_match, cw, ch
 
     def get_status(self) -> CaptureStatus:
         """返回 UI/API 需要的窗口与 FPS 摘要。"""
@@ -310,7 +312,7 @@ class CaptureService:
                     if cropped is None:
                         self._set_frame(_placeholder_preview(), hwnd, 0, 0, None)
                     else:
-                        pm = self._page_matcher.match(cropped, PREVIEW_MAX_WIDTH)
+                        pm = self._page_matcher.match(cropped)
                         out_data, w, h = _encode_cropped_to_preview(cropped)
                         self._set_frame(out_data, hwnd, w, h, pm)
                 else:

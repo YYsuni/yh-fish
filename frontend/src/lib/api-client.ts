@@ -3,6 +3,7 @@ export type PageMatchPayload = {
 	page_label: string
 	/** OpenCV TM_CCOEFF_NORMED 峰值，约 [0,1]；解析时兼容历史字段 confidence */
 	similarity: number
+	/** 与 `/api/capture/status` 中 width×height 同坐标系（裁标题栏与边距后的客户区像素） */
 	x: number
 	y: number
 	w: number

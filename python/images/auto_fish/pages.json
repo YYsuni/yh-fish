@@ -21,8 +21,8 @@
       "match_mode": "any",
       "features": [
         {
-          "file": "溜鱼条.png",
-          "region": [383.74, 94.16, 509.86, 16.58]
+          "file": "鱼耐力.png",
+          "region": [331, 138.99, 48, 20]
         }
       ]
     },

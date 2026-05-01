@@ -41,6 +41,8 @@ export function CapturePreviewSection() {
 	const [liveFps, setLiveFps] = useState<number | null>(null)
 	const [pageMatch, setPageMatch] = useState<PageMatchPayload>(null)
 	const [matchBoxCss, setMatchBoxCss] = useState<CSSProperties | null>(null)
+	/** 与 page_match 同帧的裁剪后逻辑尺寸（WS meta 或与轮询 capture 对齐） */
+	const [cropDims, setCropDims] = useState<{ w: number; h: number } | null>(null)
 	const [layoutTick, setLayoutTick] = useState(0)
 	const fpsSyncedOnce = useRef(false)
 	const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -51,6 +53,7 @@ export function CapturePreviewSection() {
 			const c = await getCaptureStatus()
 			setCapture(c)
 			setPageMatch(parsePageMatch(c.page_match ?? null))
+			if (c.width > 0 && c.height > 0) setCropDims({ w: c.width, h: c.height })
 			previewMimeRef.current = c.preview_mime
 			if (!fpsSyncedOnce.current) {
 				setFpsDraft(Math.round(c.fps))
@@ -82,26 +85,37 @@ export function CapturePreviewSection() {
 			setMatchBoxCss(null)
 			return
 		}
-		const cw = el.clientWidth
-		const ch = el.clientHeight
-		const bw = el.width
-		const bh = el.height
-		if (bw <= 0 || bh <= 0 || cw <= 0 || ch <= 0) {
+		const cropW = cropDims?.w ?? capture?.width ?? 0
+		const cropH = cropDims?.h ?? capture?.height ?? 0
+		if (cropW <= 0 || cropH <= 0) {
 			setMatchBoxCss(null)
 			return
 		}
-		const scale = Math.min(cw / bw, ch / bh)
-		const dw = bw * scale
-		const dh = bh * scale
-		const ox = (cw - dw) / 2
-		const oy = (ch - dh) / 2
+		const clientW = el.clientWidth
+		const clientH = el.clientHeight
+		const bmpW = el.width
+		const bmpH = el.height
+		if (bmpW <= 0 || bmpH <= 0 || clientW <= 0 || clientH <= 0) {
+			setMatchBoxCss(null)
+			return
+		}
+		// page_match 为裁剪像素；画布位图为缩小预览，先映射到位图像素再按比例放入 object-contain
+		const bx = (pageMatch.x * bmpW) / cropW
+		const by = (pageMatch.y * bmpH) / cropH
+		const bwR = (pageMatch.w * bmpW) / cropW
+		const bhR = (pageMatch.h * bmpH) / cropH
+		const uiScale = Math.min(clientW / bmpW, clientH / bmpH)
+		const dw = bmpW * uiScale
+		const dh = bmpH * uiScale
+		const ox = (clientW - dw) / 2
+		const oy = (clientH - dh) / 2
 		setMatchBoxCss({
-			left: ox + pageMatch.x * scale,
-			top: oy + pageMatch.y * scale,
-			width: pageMatch.w * scale,
-			height: pageMatch.h * scale
+			left: ox + bx * uiScale,
+			top: oy + by * uiScale,
+			width: bwR * uiScale,
+			height: bhR * uiScale
 		})
-	}, [pageMatch, layoutTick])
+	}, [pageMatch, layoutTick, cropDims, capture?.width, capture?.height])
 
 	useEffect(() => {
 		const canvas = canvasRef.current
@@ -130,11 +144,15 @@ export function CapturePreviewSection() {
 			if (metaLen > 256 * 1024 || buf.byteLength < WS_PREVIEW_HEADER_BYTES + metaLen) return
 
 			let pm: PageMatchPayload = null
+			let wsCrop: { w: number; h: number } | null = null
 			if (metaLen > 0) {
 				try {
 					const metaJson = new TextDecoder().decode(buf.slice(WS_PREVIEW_HEADER_BYTES, WS_PREVIEW_HEADER_BYTES + metaLen))
-					const parsed = JSON.parse(metaJson) as { page_match?: unknown }
+					const parsed = JSON.parse(metaJson) as { page_match?: unknown; crop_width?: unknown; crop_height?: unknown }
 					pm = parsePageMatch(parsed.page_match ?? null)
+					const cw = Math.round(Number(parsed.crop_width))
+					const ch = Math.round(Number(parsed.crop_height))
+					if ([cw, ch].every(Number.isFinite) && cw > 0 && ch > 0) wsCrop = { w: cw, h: ch }
 				} catch {
 					/* ignore */
 				}
@@ -161,6 +179,7 @@ export function CapturePreviewSection() {
 				if (!cancelled) {
 					setLiveFps(liveFps)
 					setPageMatch(pm)
+					if (wsCrop) setCropDims(wsCrop)
 				}
 			} catch (e) {
 				if (!cancelled) setError(e instanceof Error ? e.message : String(e))
@@ -250,7 +269,7 @@ export function CapturePreviewSection() {
 
 			<div className='mt-5 grid grid-cols-2 gap-3'>
 				<div className='rounded-xl bg-slate-50/90 p-3 ring-1 ring-slate-100 sm:col-span-2'>
-					<p className='text-xs font-medium tracking-wider text-slate-500 uppercase'>OpenCV 页面（预览坐标）</p>
+					<p className='text-xs font-medium tracking-wider text-slate-500 uppercase'>OpenCV 页面（裁剪后坐标）</p>
 					<p className='mt-1 text-sm text-slate-900'>{summaryMatch?.page_label || '—'}</p>
 					<p className='mt-1 font-mono text-xs text-slate-600'>
 						{summaryMatch && summaryMatch.w > 0

@@ -19,7 +19,7 @@ DEFAULT_PRE_CROP_LEFT_PX = 2
 
 @dataclass(frozen=True)
 class PageMatchResult:
-    """匹配结果：标签为 pages.json 中 `label`；坐标为预览图（缩放后）像素。"""
+    """匹配结果：标签为 pages.json 中 `label`；矩形为裁剪去边距后的客户区像素（与捕获 status 宽高同坐标系）。"""
 
     page_id: str
     label: str
@@ -86,32 +86,6 @@ def _as_float_or_none(v: object) -> float | None:
         return float(v)
     except (TypeError, ValueError):
         return None
-
-
-def _map_rect_to_preview(
-    crop_w: int,
-    crop_h: int,
-    preview_max_w: int,
-    rx: int,
-    ry: int,
-    rw: int,
-    rh: int,
-) -> tuple[int, int, int, int]:
-    """将裁剪坐标系下的矩形映射到 `_downscale_preview_max_width` 后的预览尺寸。"""
-    if crop_w <= 0 or crop_h <= 0:
-        return rx, ry, rw, rh
-    if crop_w <= preview_max_w:
-        return rx, ry, rw, rh
-    pw = preview_max_w
-    ph = max(1, int(round(crop_h * pw / crop_w)))
-    sx = pw / crop_w
-    sy = ph / crop_h
-    return (
-        int(round(rx * sx)),
-        int(round(ry * sy)),
-        max(1, int(round(rw * sx))),
-        max(1, int(round(rh * sy))),
-    )
 
 
 def _match_one_feature(
@@ -193,6 +167,13 @@ class PageTemplateMatcher:
                 fp = (base / fn).resolve()
                 if not fp.is_file():
                     continue
+                try:
+                    im = Image.open(fp).convert("RGB")
+                    arr = np.asarray(im)
+                except OSError:
+                    continue
+                if arr.ndim != 3 or arr.shape[2] != 3:
+                    continue
                 rect = f.get("region")
                 if not isinstance(rect, list) or len(rect) != 4:
                     continue
@@ -205,13 +186,6 @@ class PageTemplateMatcher:
                         top_px=self._pre_crop_top_px,
                     )
                 except (TypeError, ValueError):
-                    continue
-                try:
-                    im = Image.open(fp).convert("RGB")
-                    arr = np.asarray(im)
-                except OSError:
-                    continue
-                if arr.ndim != 3 or arr.shape[2] != 3:
                     continue
                 g = _crop_rgb_by_rect(arr, rect)
                 if g is None:
@@ -254,12 +228,8 @@ class PageTemplateMatcher:
         self._templates_by_pid = {}
         self._ensure_loaded()
 
-    def match(
-        self,
-        cropped_rgb: Image.Image,
-        preview_max_width: int,
-    ) -> PageMatchResult | None:
-        """在「裁剪后的整窗客户区 RGB」上与模板比对；坐标映射到与同帧预览编码一致的缩小图。"""
+    def match(self, cropped_rgb: Image.Image) -> PageMatchResult | None:
+        """在裁剪后的客户区 RGB 上与模板比对；返回的矩形为裁剪坐标系像素（未经预览缩小）。"""
         self._ensure_loaded()
         if not self._templates_by_pid:
             return None
@@ -328,13 +298,12 @@ class PageTemplateMatcher:
             candidates,
             key=lambda c: (_rank(c[1]), -c[0]),
         )
-        px_x, px_y, px_w, px_h = _map_rect_to_preview(cw, ch, preview_max_width, bx, by, bw, bh)
         return PageMatchResult(
             page_id=pid,
             label=label,
             confidence=float(_conf),
-            x=px_x,
-            y=px_y,
-            w=px_w,
-            h=px_h,
+            x=int(bx),
+            y=int(by),
+            w=int(bw),
+            h=int(bh),
         )
