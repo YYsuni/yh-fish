@@ -44,21 +44,34 @@ function formatLiveFpsLabel(liveFps: number | null): string {
 	return `${liveFps >= 10 ? Math.round(liveFps) : liveFps.toFixed(1)} FPS`
 }
 
+type DraftSaving = { draft: number; saving: boolean }
+
+type PreviewOverlay = {
+	liveFps: number | null
+	pageMatch: PageMatchPayload
+	/** 与 page_match 同帧的裁剪后逻辑尺寸（WS meta 或与轮询 capture 对齐） */
+	cropDims: { w: number; h: number } | null
+	pipelineMs: PipelineMsPayload | null
+}
+
+const initialPreviewOverlay: PreviewOverlay = {
+	liveFps: null,
+	pageMatch: null,
+	cropDims: null,
+	pipelineMs: null
+}
+
 export function CapturePreviewSection() {
 	const [capture, setCapture] = useState<CaptureStatusResponse | null>(null)
 	const [error, setError] = useState<string | null>(null)
 	const [streamKey, setStreamKey] = useState(0)
-	const [fpsDraft, setFpsDraft] = useState(15)
-	const [fpsSaving, setFpsSaving] = useState(false)
-	const [matchThDraft, setMatchThDraft] = useState(0.5)
-	const [matchThSaving, setMatchThSaving] = useState(false)
-	const [liveFps, setLiveFps] = useState<number | null>(null)
-	const [pageMatch, setPageMatch] = useState<PageMatchPayload>(null)
+	const [fps, setFps] = useState<DraftSaving>({ draft: 15, saving: false })
+	const [matchTh, setMatchTh] = useState<DraftSaving>({ draft: 0.5, saving: false })
+	const [preview, setPreview] = useState<PreviewOverlay>(initialPreviewOverlay)
 	const [matchBoxCss, setMatchBoxCss] = useState<CSSProperties | null>(null)
-	/** 与 page_match 同帧的裁剪后逻辑尺寸（WS meta 或与轮询 capture 对齐） */
-	const [cropDims, setCropDims] = useState<{ w: number; h: number } | null>(null)
-	const [pipelineMs, setPipelineMs] = useState<PipelineMsPayload | null>(null)
 	const [layoutTick, setLayoutTick] = useState(0)
+
+	const { liveFps, pageMatch, cropDims, pipelineMs } = preview
 	const fpsSyncedOnce = useRef(false)
 	const matchThSyncedOnce = useRef(false)
 	const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -68,19 +81,22 @@ export function CapturePreviewSection() {
 		try {
 			const c = await getCaptureStatus()
 			setCapture(c)
-			setPageMatch(parsePageMatch(c.page_match ?? null))
-			if (c.width > 0 && c.height > 0) setCropDims({ w: c.width, h: c.height })
+			setPreview(p => ({
+				...p,
+				pageMatch: parsePageMatch(c.page_match ?? null),
+				cropDims: c.width > 0 && c.height > 0 ? { w: c.width, h: c.height } : p.cropDims,
+				pipelineMs: c.pipeline_ms != null ? normalizePipelineMs(c.pipeline_ms) : p.pipelineMs
+			}))
 			previewMimeRef.current = c.preview_mime
 			if (!fpsSyncedOnce.current) {
-				setFpsDraft(Math.round(c.fps))
+				setFps(f => ({ ...f, draft: Math.round(c.fps) }))
 				fpsSyncedOnce.current = true
 			}
 			if (!matchThSyncedOnce.current) {
 				const th = Number(c.page_match_threshold)
-				setMatchThDraft(Number.isFinite(th) ? th : 0.5)
+				setMatchTh(m => ({ ...m, draft: Number.isFinite(th) ? th : 0.5 }))
 				matchThSyncedOnce.current = true
 			}
-			if (c.pipeline_ms != null) setPipelineMs(normalizePipelineMs(c.pipeline_ms))
 			setError(null)
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e))
@@ -167,6 +183,7 @@ export function CapturePreviewSection() {
 
 			let pm: PageMatchPayload = null
 			let wsCrop: { w: number; h: number } | null = null
+			let metaPipelineMs: PipelineMsPayload | undefined
 			if (metaLen > 0) {
 				try {
 					const metaJson = new TextDecoder().decode(buf.slice(WS_PREVIEW_HEADER_BYTES, WS_PREVIEW_HEADER_BYTES + metaLen))
@@ -177,7 +194,7 @@ export function CapturePreviewSection() {
 						pipeline_ms?: unknown
 					}
 					pm = parsePageMatch(parsed.page_match ?? null)
-					if (parsed.pipeline_ms != null) setPipelineMs(normalizePipelineMs(parsed.pipeline_ms))
+					if (parsed.pipeline_ms != null) metaPipelineMs = normalizePipelineMs(parsed.pipeline_ms)
 					const cw = Math.round(Number(parsed.crop_width))
 					const ch = Math.round(Number(parsed.crop_height))
 					if ([cw, ch].every(Number.isFinite) && cw > 0 && ch > 0) wsCrop = { w: cw, h: ch }
@@ -205,9 +222,13 @@ export function CapturePreviewSection() {
 				bmp.close()
 
 				if (!cancelled) {
-					setLiveFps(liveFps)
-					setPageMatch(pm)
-					if (wsCrop) setCropDims(wsCrop)
+					setPreview(prev => ({
+						...prev,
+						liveFps,
+						pageMatch: pm,
+						cropDims: wsCrop ?? prev.cropDims,
+						...(metaPipelineMs !== undefined ? { pipelineMs: metaPipelineMs } : {})
+					}))
 				}
 			} catch (e) {
 				if (!cancelled) setError(e instanceof Error ? e.message : String(e))
@@ -229,38 +250,36 @@ export function CapturePreviewSection() {
 	}, [streamKey])
 
 	const applyFps = useCallback(async () => {
-		const n = Math.min(FPS_MAX, Math.max(FPS_MIN, Math.round(Number(fpsDraft)) || FPS_MIN))
-		setFpsDraft(n)
-		setFpsSaving(true)
+		const n = Math.min(FPS_MAX, Math.max(FPS_MIN, Math.round(Number(fps.draft)) || FPS_MIN))
+		setFps(f => ({ ...f, draft: n, saving: true }))
 		try {
-			const { fps } = await postCaptureFps(n)
-			setFpsDraft(Math.round(fps))
+			const { fps: saved } = await postCaptureFps(n)
+			setFps(f => ({ ...f, draft: Math.round(saved) }))
 			setStreamKey(k => k + 1)
 			setError(null)
 			void refreshCapture()
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e))
 		} finally {
-			setFpsSaving(false)
+			setFps(f => ({ ...f, saving: false }))
 		}
-	}, [fpsDraft, refreshCapture])
+	}, [fps.draft, refreshCapture])
 
 	const applyMatchThreshold = useCallback(async () => {
-		const t = Math.min(MATCH_TH_MAX, Math.max(MATCH_TH_MIN, Number(matchThDraft)))
-		setMatchThDraft(t)
-		setMatchThSaving(true)
+		const t = Math.min(MATCH_TH_MAX, Math.max(MATCH_TH_MIN, Number(matchTh.draft)))
+		setMatchTh(m => ({ ...m, draft: t, saving: true }))
 		try {
 			const { page_match_threshold } = await postCaptureMatchThreshold(t)
-			setMatchThDraft(page_match_threshold)
+			setMatchTh(m => ({ ...m, draft: page_match_threshold }))
 			setStreamKey(k => k + 1)
 			setError(null)
 			void refreshCapture()
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e))
 		} finally {
-			setMatchThSaving(false)
+			setMatchTh(m => ({ ...m, saving: false }))
 		}
-	}, [matchThDraft, refreshCapture])
+	}, [matchTh.draft, refreshCapture])
 
 	const summaryMatch = pageMatch ?? parsePageMatch(capture?.page_match ?? null)
 
@@ -281,7 +300,7 @@ export function CapturePreviewSection() {
 			<div className='mt-5 flex flex-wrap items-end gap-4'>
 				<div className='flex flex-col gap-1'>
 					<label htmlFor='capture-fps' className='text-xs font-medium text-slate-500'>
-						预览帧率（FPS）
+						帧率（FPS）
 					</label>
 					<div className='flex items-center gap-2'>
 						<input
@@ -289,24 +308,24 @@ export function CapturePreviewSection() {
 							type='range'
 							min={FPS_MIN}
 							max={FPS_MAX}
-							value={fpsDraft}
-							onChange={e => setFpsDraft(Number(e.target.value))}
+							value={fps.draft}
+							onChange={e => setFps(f => ({ ...f, draft: Number(e.target.value) }))}
 							className='w-40 accent-slate-700'
 						/>
 						<input
 							type='number'
 							min={FPS_MIN}
 							max={FPS_MAX}
-							value={fpsDraft}
-							onChange={e => setFpsDraft(Number(e.target.value))}
+							value={fps.draft}
+							onChange={e => setFps(f => ({ ...f, draft: Number(e.target.value) }))}
 							className='w-14 rounded-lg border border-slate-200 bg-white px-2 py-1 text-center text-xs text-slate-800 tabular-nums'
 						/>
 						<button
 							type='button'
-							disabled={fpsSaving}
+							disabled={fps.saving}
 							className='rounded-xl bg-white px-3 py-2 text-xs font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-50'
 							onClick={() => void applyFps()}>
-							{fpsSaving ? '保存中…' : '应用'}
+							{fps.saving ? '保存中…' : '应用'}
 						</button>
 					</div>
 				</div>
@@ -321,8 +340,8 @@ export function CapturePreviewSection() {
 							min={MATCH_TH_MIN}
 							max={MATCH_TH_MAX}
 							step={0.01}
-							value={matchThDraft}
-							onChange={e => setMatchThDraft(Number(e.target.value))}
+							value={matchTh.draft}
+							onChange={e => setMatchTh(m => ({ ...m, draft: Number(e.target.value) }))}
 							className='w-40 accent-slate-700'
 						/>
 						<input
@@ -330,16 +349,16 @@ export function CapturePreviewSection() {
 							min={MATCH_TH_MIN}
 							max={MATCH_TH_MAX}
 							step={0.01}
-							value={matchThDraft}
-							onChange={e => setMatchThDraft(Number(e.target.value))}
+							value={matchTh.draft}
+							onChange={e => setMatchTh(m => ({ ...m, draft: Number(e.target.value) }))}
 							className='w-16 rounded-lg border border-slate-200 bg-white px-2 py-1 text-center text-xs text-slate-800 tabular-nums'
 						/>
 						<button
 							type='button'
-							disabled={matchThSaving}
+							disabled={matchTh.saving}
 							className='rounded-xl bg-white px-3 py-2 text-xs font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-50'
 							onClick={() => void applyMatchThreshold()}>
-							{matchThSaving ? '保存中…' : '应用'}
+							{matchTh.saving ? '保存中…' : '应用'}
 						</button>
 					</div>
 				</div>
