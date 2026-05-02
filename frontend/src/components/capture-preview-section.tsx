@@ -1,3 +1,4 @@
+import { Button, Card, Divider, Icon, Input } from 'animal-island-ui'
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
 	type CaptureStatusResponse,
@@ -284,99 +285,90 @@ export function CapturePreviewSection() {
 	const summaryMatch = pageMatch ?? parsePageMatch(capture?.page_match ?? null)
 
 	return (
-		<section className='mb-8 w-[400px]'>
+		<section className='mb-8 w-full max-w-md'>
+			<div className='mb-3 flex items-center gap-2'>
+				<Icon name='icon-camera' size={26} bounce />
+				<span className='font-medium'>窗口捕获预览</span>
+			</div>
+
 			<div className='relative w-full'>
-				<canvas ref={canvasRef} className='block max-h-[480px] w-full rounded-md bg-slate-100 object-contain' />
+				<canvas ref={canvasRef} className='block max-h-[480px] w-full rounded-md bg-[#e8e4d4] object-contain' />
 				<div
-					className='pointer-events-none absolute top-2 left-2 z-10 rounded-lg bg-slate-900/75 px-2.5 py-1 text-xs leading-none font-medium tracking-tight text-slate-100'
+					className='pointer-events-none absolute top-2 left-2 z-10 rounded-lg bg-[#8ac68a]/95 px-2.5 py-1 text-xs leading-none font-medium tracking-tight text-white shadow-sm'
 					aria-live='polite'>
 					{formatLiveFpsLabel(liveFps)}
 				</div>
-				{matchBoxCss && <div className='pointer-events-none absolute z-9 rounded-xs ring-1 ring-red-600' style={matchBoxCss} aria-hidden />}
+				{matchBoxCss && <div className='pointer-events-none absolute z-9 rounded-sm ring-2 ring-[#fc736d]' style={matchBoxCss} aria-hidden />}
 			</div>
 
-			{error && <p className='mt-5 text-red-500'>{error}</p>}
+			{error != null && error !== '' && (
+				<Card color='app-red' className='mt-4 p-3'>
+					<p className='text-sm'>{error}</p>
+				</Card>
+			)}
 
-			<div className='mt-5 flex flex-wrap items-end gap-4'>
+			<Divider className='my-4' type='line-brown' />
+
+			<div className='grid grid-cols-2 gap-4'>
 				<div className='flex flex-col gap-1'>
-					<label htmlFor='capture-fps' className='text-xs font-medium text-slate-500'>
-						帧率（FPS）
+					<label htmlFor='capture-fps' className='text-xs font-medium text-[#725d42]'>
+						帧率（FPS）: {fps.draft}
 					</label>
-					<div className='flex items-center gap-2'>
-						<input
-							id='capture-fps'
-							type='range'
-							min={FPS_MIN}
-							max={FPS_MAX}
-							value={fps.draft}
-							onChange={e => setFps(f => ({ ...f, draft: Number(e.target.value) }))}
-							className='w-40 accent-slate-700'
-						/>
-						<input
-							type='number'
-							min={FPS_MIN}
-							max={FPS_MAX}
-							value={fps.draft}
-							onChange={e => setFps(f => ({ ...f, draft: Number(e.target.value) }))}
-							className='w-14 rounded-lg border border-slate-200 bg-white px-2 py-1 text-center text-xs text-slate-800 tabular-nums'
-						/>
-						<button
-							type='button'
-							disabled={fps.saving}
-							className='rounded-xl bg-white px-3 py-2 text-xs font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-50'
-							onClick={() => void applyFps()}>
-							{fps.saving ? '保存中…' : '应用'}
-						</button>
-					</div>
+					<input
+						id='capture-fps'
+						type='range'
+						min={FPS_MIN}
+						max={FPS_MAX}
+						value={fps.draft}
+						onChange={e => setFps(f => ({ ...f, draft: Number(e.target.value) }))}
+						className='w-full accent-[#725d42]'
+					/>
 				</div>
 				<div className='flex flex-col gap-1'>
-					<label htmlFor='capture-match-th' className='text-xs font-medium text-slate-500'>
-						页面匹配阈值（0–1）
+					<label htmlFor='capture-match-th' className='text-xs font-medium text-[#725d42]'>
+						页面匹配阈值（0–1）: {matchTh.draft.toFixed(2)}
 					</label>
-					<div className='flex items-center gap-2'>
-						<input
-							id='capture-match-th'
-							type='range'
-							min={MATCH_TH_MIN}
-							max={MATCH_TH_MAX}
-							step={0.01}
-							value={matchTh.draft}
-							onChange={e => setMatchTh(m => ({ ...m, draft: Number(e.target.value) }))}
-							className='w-40 accent-slate-700'
-						/>
-						<input
-							type='number'
-							min={MATCH_TH_MIN}
-							max={MATCH_TH_MAX}
-							step={0.01}
-							value={matchTh.draft}
-							onChange={e => setMatchTh(m => ({ ...m, draft: Number(e.target.value) }))}
-							className='w-16 rounded-lg border border-slate-200 bg-white px-2 py-1 text-center text-xs text-slate-800 tabular-nums'
-						/>
-						<button
-							type='button'
-							disabled={matchTh.saving}
-							className='rounded-xl bg-white px-3 py-2 text-xs font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-50'
-							onClick={() => void applyMatchThreshold()}>
-							{matchTh.saving ? '保存中…' : '应用'}
-						</button>
-					</div>
+					<input
+						id='capture-match-th'
+						type='range'
+						min={MATCH_TH_MIN}
+						max={MATCH_TH_MAX}
+						step={0.1}
+						value={matchTh.draft}
+						onChange={e => setMatchTh(m => ({ ...m, draft: Number(e.target.value) }))}
+						className='w-full accent-[#725d42]'
+					/>
 				</div>
 			</div>
 
-			<div className='mt-5 grid grid-cols-2 gap-3'>
-				<div className='rounded-xl bg-slate-50/90 p-3 ring-1 ring-slate-100'>
-					<p className='text-xs font-medium tracking-wider text-slate-500 uppercase'>页面识别</p>
-					<p className='mt-1 text-sm text-slate-900'>{summaryMatch?.page_label || '—'}</p>
-					<p className='mt-1 font-mono text-xs text-slate-600'>
+			<Button
+				type='primary'
+				block
+				className='mt-4'
+				size='small'
+				htmlType='button'
+				loading={fps.saving}
+				disabled={fps.saving}
+				onClick={() => {
+					void applyFps()
+					void applyMatchThreshold()
+				}}>
+				应用
+			</Button>
+
+			<div className='mt-6 grid grid-cols-2 gap-3'>
+				<Card color='app-teal' className='p-3'>
+					<p className='text-xs font-medium tracking-wider uppercase opacity-90'>页面识别</p>
+					<p className='mt-1 text-sm font-medium'>{summaryMatch?.page_label || '—'}</p>
+					<p className='mt-1 font-mono text-xs opacity-90'>
 						{summaryMatch && summaryMatch.w > 0 ? `x=${summaryMatch.x} y=${summaryMatch.y} w=${summaryMatch.w} h=${summaryMatch.h}` : '—'}
 					</p>
-					<p className='mt-1 font-mono text-xs text-slate-600'>相似度：{summaryMatch?.similarity.toFixed(4)}</p>
-				</div>
-				<div className='rounded-xl bg-slate-50/90 p-3 ring-1 ring-slate-100'>
-					<p className='text-xs font-medium tracking-wider text-slate-500 uppercase'>窗口尺寸</p>
-					<p className='mt-1 font-mono text-sm text-slate-900'>{capture && capture.width > 0 ? `${capture.width} × ${capture.height}` : '—'}</p>
-				</div>
+					<p className='mt-1 font-mono text-xs opacity-90'>相似度：{summaryMatch?.similarity.toFixed(4)}</p>
+				</Card>
+				<Card color='app-blue' className='p-3'>
+					<p className='text-xs font-medium tracking-wider uppercase opacity-90'>窗口尺寸</p>
+					<p className='mt-1 font-mono text-sm font-medium'>{capture && capture.width > 0 ? `${capture.width} × ${capture.height}` : '—'}</p>
+				</Card>
 			</div>
 
 			<CapturePipelineDebugPanel pipelineMs={pipelineMs} />

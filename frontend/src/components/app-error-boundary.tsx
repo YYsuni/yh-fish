@@ -1,3 +1,4 @@
+import { Button, Card } from 'animal-island-ui'
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 
 type Props = {
@@ -27,20 +28,19 @@ export class AppErrorBoundary extends Component<Props, State> {
 		const { error } = this.state
 		if (error) {
 			return (
-				<div className='flex h-full flex-col items-center justify-center gap-4 px-6 py-12 text-center'>
-					<p className='text-sm font-medium text-slate-900'>页面渲染出错</p>
-					<p className='max-w-md text-xs text-red-500'>{error.message}</p>
-					{import.meta.env.DEV && error.stack && (
-						<pre className='max-h-40 max-w-xl overflow-auto rounded-lg bg-slate-100 px-3 py-2 text-left font-mono text-[10px] whitespace-pre-wrap text-slate-600'>
-							{error.stack}
-						</pre>
-					)}
-					<button
-						type='button'
-						onClick={this.handleRetry}
-						className='rounded-xl bg-white px-3 py-2 text-xs font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50'>
-						重试
-					</button>
+				<div className='flex min-h-screen flex-col items-center justify-center gap-4 px-6 py-12 text-center'>
+					<Card color='app-red' className='max-w-lg p-6'>
+						<p className='text-sm font-medium'>页面渲染出错</p>
+						<p className='mt-2 text-xs opacity-95'>{error.message}</p>
+						{import.meta.env.DEV && error.stack && (
+							<pre className='mt-3 max-h-40 max-w-xl overflow-auto rounded-lg bg-black/10 px-3 py-2 text-left font-mono text-[10px] whitespace-pre-wrap opacity-90'>
+								{error.stack}
+							</pre>
+						)}
+						<Button type='primary' className='mt-4' htmlType='button' onClick={this.handleRetry}>
+							重试
+						</Button>
+					</Card>
 				</div>
 			)
 		}
