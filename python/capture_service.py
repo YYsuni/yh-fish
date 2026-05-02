@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from PIL import Image
 
-from page_template_match import PageMatchEnvelope, PageTemplateMatcher
+from page_template_match import PageMatchResult, PageTemplateMatcher
 
 if sys.platform == "win32":
     from native_stream import WgcHwndStreamer, native_backend_available
@@ -124,37 +124,19 @@ class CaptureStatus:
     page_match_threshold: float
 
 
-def _serialize_page_match(env: PageMatchEnvelope | None) -> dict[str, object] | None:
-    """将 `PageMatchEnvelope` 转为可 JSON 序列化的 dict；无页面匹配且无 debug 条目时返回 None。"""
-    if env is None:
+def _serialize_page_match(result: PageMatchResult | None) -> dict[str, object] | None:
+    """将 `PageMatchResult` 转为可 JSON 序列化的 dict；无匹配时返回 None。"""
+    if result is None:
         return None
-    td = list(env.template_debug)
-    r = env.result
-    if r is None:
-        if not td:
-            return None
-        return {
-            "page_id": "",
-            "page_label": "",
-            "similarity": 0.0,
-            "x": 0,
-            "y": 0,
-            "w": 0,
-            "h": 0,
-            "template_debug": td,
-        }
-    row: dict[str, object] = {
-        "page_id": r.page_id,
-        "page_label": r.label,
-        "similarity": float(r.confidence),
-        "x": int(r.x),
-        "y": int(r.y),
-        "w": int(r.w),
-        "h": int(r.h),
+    return {
+        "page_id": result.page_id,
+        "page_label": result.label,
+        "similarity": float(result.confidence),
+        "x": int(result.x),
+        "y": int(result.y),
+        "w": int(result.w),
+        "h": int(result.h),
     }
-    if td:
-        row["template_debug"] = td
-    return row
 
 
 class CaptureService:
@@ -276,12 +258,15 @@ class CaptureService:
         from window_capture import find_game_hwnd, window_title_bar_crop_px
 
         while not self._stop.is_set():
+            # 本轮开始时间，用于后面 sleep 补时，尽量贴近目标 FPS。
             t_iter = time.monotonic()
             with self._lock:
                 fps = self._fps
+            # 目标帧间隔（秒）；WGC 两次抓拍的最小间隔（毫秒），约为半帧，且不低于 8ms。
             interval = 1.0 / fps
             min_iv = max(1000.0 / fps / 2.0, 8.0)
 
+            # 按标题正则找游戏窗口；未找到则占位图 + 释放 WGC 目标。
             hwnd = find_game_hwnd(self._title_regex)
             if hwnd is None:
                 self._wgc.ensure_hwnd(None, quality=WGC_JPEG_QUALITY, min_interval_ms=min_iv)
@@ -290,6 +275,7 @@ class CaptureService:
                 self._wgc.ensure_hwnd(hwnd, quality=WGC_JPEG_QUALITY, min_interval_ms=min_iv)
                 data, w, h, _ = self._wgc.get_snapshot()
                 if data:
+                    # 去掉标题栏等顶部像素，解码 JPEG 后裁成 RGB，供匹配与预览。
                     chop = window_title_bar_crop_px(hwnd)
                     cropped = _decode_and_crop_rgb(data, chop)
                     if cropped is None:
@@ -299,8 +285,10 @@ class CaptureService:
                         out_data, w, h = _encode_cropped_to_preview(cropped)
                         self._set_frame(out_data, hwnd, w, h, pm)
                 else:
+                    # 本帧抓拍失败（空数据）：仍带上 hwnd，前端可知窗口在但画面不可用。
                     self._set_frame(_placeholder_preview(), hwnd, 0, 0, None)
 
+            # 扣除本轮耗时，剩余时间 sleep，避免跑满 CPU。
             delay = interval - (time.monotonic() - t_iter)
             if delay > 0:
                 time.sleep(delay)
@@ -311,7 +299,7 @@ class CaptureService:
         hwnd: int | None,
         w: int,
         h: int,
-        page_match: PageMatchEnvelope | None,
+        page_match: PageMatchResult | None,
     ) -> None:
         """原子更新最新帧、HWND、逻辑尺寸、页面匹配；并记录实测 FPS 样本。"""
         with self._lock:

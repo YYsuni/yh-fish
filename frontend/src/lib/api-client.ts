@@ -1,14 +1,3 @@
-/** `pages.json` 中 `features[].debug=true` 时服务端每帧附带的 ROI / 模板 JPEG（Base64、无 data URL 前缀） */
-export type TemplateDebugEntry = {
-	page_id: string
-	page_label: string
-	template_file: string
-	similarity: number
-	region: readonly [number, number, number, number]
-	roi_jpeg_base64: string
-	template_jpeg_base64: string
-}
-
 export type PageMatchPayload = {
 	page_id: string
 	page_label: string
@@ -17,7 +6,6 @@ export type PageMatchPayload = {
 	y: number
 	w: number
 	h: number
-	template_debug?: TemplateDebugEntry[]
 } | null
 
 export type CaptureStatusResponse = {
