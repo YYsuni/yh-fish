@@ -107,36 +107,82 @@ def _crop_rgb_by_rect(
     return out
 
 
-def _match_one_feature(
-    scene_rgb: np.ndarray,
-    tpl_rgb: np.ndarray,
-) -> tuple[int, int, int, int, float] | None:
-    sh, sw = scene_rgb.shape[:2]
-    th, tw = tpl_rgb.shape[:2]
-    if th > sh or tw > sw or th < 1 or tw < 1:
-        return None
-
-    res = cv2.matchTemplate(scene_rgb, tpl_rgb, cv2.TM_CCOEFF_NORMED)
-    _min_v, max_v, _min_loc, max_loc = cv2.minMaxLoc(res)
-    mx, my = max_loc
-    return (mx, my, tw, th, float(max_v))
-
-
 def _match_template_in_roi(
     scene_rgb: np.ndarray,
     region: tuple[int, int, int, int],
     tpl_rgb: np.ndarray,
 ) -> tuple[int, int, int, int, float] | None:
     """在 `scene_rgb` 的 region ROI 内对 `tpl_rgb` 做模板匹配；返回 (全局 x, 全局 y, w, h, score)。"""
-    rx, ry, rw, rh = region
+    rx, ry, _, _ = region
     roi = _crop_rgb_by_rect(scene_rgb, region)
     if roi is None:
         return None
-    loc = _match_one_feature(roi, tpl_rgb)
-    if loc is None:
+    sh, sw = roi.shape[:2]
+    th, tw = tpl_rgb.shape[:2]
+    if th > sh or tw > sw or th < 1 or tw < 1:
         return None
-    mx, my, tw, th, cf = loc
-    return (rx + mx, ry + my, tw, th, cf)
+    res = cv2.matchTemplate(roi, tpl_rgb, cv2.TM_CCOEFF_NORMED)
+    _min_v, max_v, _min_loc, max_loc = cv2.minMaxLoc(res)
+    mx, my = max_loc
+    return (rx + mx, ry + my, tw, th, float(max_v))
+
+
+def _eval_page_features(
+    mode: str,
+    feats: list[_FeatureTemplate],
+    scene: np.ndarray,
+    th_val: float,
+) -> tuple[int, int, int, int, float] | None:
+    """单页：按 match_mode 聚合特征匹配；成功返回 (bx, by, bw, bh, confidence)。"""
+    if mode == "all":
+        matched: list[tuple[int, int, int, int, float]] = []
+        for ft in feats:
+            r = _match_template_in_roi(scene, ft.region_cropped, ft.tpl_rgb)
+            if r is None or r[4] < th_val:
+                return None
+            matched.append(r)
+        xs = [t[0] for t in matched]
+        ys = [t[1] for t in matched]
+        xe = [t[0] + t[2] for t in matched]
+        ye = [t[1] + t[3] for t in matched]
+        ux0, uy0, ux1, uy1 = min(xs), min(ys), max(xe), max(ye)
+        bx, by = ux0, uy0
+        bw, bh = ux1 - ux0, uy1 - uy0
+        return (bx, by, bw, bh, min(t[4] for t in matched))
+
+    hits: list[tuple[int, int, int, int, float]] = []
+    for ft in feats:
+        r = _match_template_in_roi(scene, ft.region_cropped, ft.tpl_rgb)
+        if r is None:
+            continue
+        x_, y_, w_, h_, conf = r
+        if conf >= th_val:
+            hits.append((x_, y_, w_, h_, conf))
+    if not hits:
+        return None
+    bx, by, bw, bh, uconf = max(hits, key=lambda t: t[4])
+    return (bx, by, bw, bh, uconf)
+
+
+def _feature_debug_row(
+    pid: str,
+    label: str,
+    scene: np.ndarray,
+    ft: _FeatureTemplate,
+) -> dict[str, object]:
+    rx, ry, rw, rh = ft.region_cropped
+    roi = _crop_rgb_by_rect(scene, ft.region_cropped)
+    mt = _match_template_in_roi(scene, ft.region_cropped, ft.tpl_rgb)
+    sim = float(mt[4]) if mt else 0.0
+    return {
+        "page_id": pid,
+        "page_label": label,
+        "template_file": ft.template_file,
+        "similarity": sim,
+        "region": [int(rx), int(ry), int(rw), int(rh)],
+        "roi_jpeg_base64": _rgb_to_jpeg_base64(roi) if roi is not None else "",
+        "template_jpeg_base64": _rgb_to_jpeg_base64(ft.tpl_rgb),
+    }
 
 
 class PageTemplateMatcher:
@@ -169,12 +215,11 @@ class PageTemplateMatcher:
             return
         base = self._path.parent
         raw_pri = data.get("page_priority") if isinstance(data, dict) else None
-        pri_tokens: list[str] = []
-        if isinstance(raw_pri, list):
-            for x in raw_pri:
-                s = str(x).strip()
-                if s:
-                    pri_tokens.append(s)
+        pri_tokens = (
+            [s for x in raw_pri if (s := str(x).strip())]
+            if isinstance(raw_pri, list)
+            else []
+        )
         pages = data.get("pages") if isinstance(data, dict) else None
         if not isinstance(pages, list):
             self._templates_by_pid = {}
@@ -248,13 +293,9 @@ class PageTemplateMatcher:
         priority_rank: dict[str, int] = {}
         rank = 0
         for tok in pri_tokens:
-            rid: str | None
-            if tok in label_to_pid:
-                rid = label_to_pid[tok]
-            elif tok in loaded:
+            rid = label_to_pid.get(tok)
+            if rid is None and tok in loaded:
                 rid = tok
-            else:
-                rid = None
             if rid is None or rid in priority_rank:
                 continue
             priority_rank[rid] = rank
@@ -294,76 +335,30 @@ class PageTemplateMatcher:
         th_val = self._threshold
 
         dbg_rows: list[dict[str, object]] = []
-        for pid, (label, _mode, feats) in self._templates_by_pid.items():
-            for ft in feats:
-                if not ft.debug:
-                    continue
-                rx, ry, rw, rh = ft.region_cropped
-                roi = _crop_rgb_by_rect(scene, ft.region_cropped)
-                mt = _match_template_in_roi(scene, ft.region_cropped, ft.tpl_rgb)
-                sim = float(mt[4]) if mt else 0.0
-                dbg_rows.append(
-                    {
-                        "page_id": pid,
-                        "page_label": label,
-                        "template_file": ft.template_file,
-                        "similarity": sim,
-                        "region": [int(rx), int(ry), int(rw), int(rh)],
-                        "roi_jpeg_base64": _rgb_to_jpeg_base64(roi) if roi is not None else "",
-                        "template_jpeg_base64": _rgb_to_jpeg_base64(ft.tpl_rgb),
-                    }
-                )
-        dbg_tuple = tuple(dbg_rows)
+        candidates: list[tuple[float, str, str, int, int, int, int]] = []
+        pri_len = len(self._priority_rank)
 
         def _rank(pg_id: str) -> int:
-            # 未出现在 priority 中的页面视作最低优先级
-            return self._priority_rank.get(pg_id, len(self._priority_rank) + 10_000)
-
-        candidates: list[tuple[float, str, str, int, int, int, int]] = []
+            return self._priority_rank.get(pg_id, pri_len + 10_000)
 
         for pid, (label, mode, feats) in self._templates_by_pid.items():
-            if mode == "all":
-                per: list[tuple[int, int, int, int, float]] = []
-                ok = True
-                for ft in feats:
-                    r = _match_template_in_roi(scene, ft.region_cropped, ft.tpl_rgb)
-                    if r is None or r[4] < th_val:
-                        ok = False
-                        break
-                    per.append(r)
-                if not ok or len(per) != len(feats):
-                    continue
-                xs = [h[0] for h in per]
-                ys = [h[1] for h in per]
-                xe = [h[0] + h[2] for h in per]
-                ye = [h[1] + h[3] for h in per]
-                ux0, uy0, ux1, uy1 = min(xs), min(ys), max(xe), max(ye)
-                uconf = min(h[4] for h in per)
-                bx, by, bw, bh = ux0, uy0, ux1 - ux0, uy1 - uy0
-                cand = (uconf, pid, label, bx, by, bw, bh)
-            else:
-                hits: list[tuple[int, int, int, int, float]] = []
-                for ft in feats:
-                    r = _match_template_in_roi(scene, ft.region_cropped, ft.tpl_rgb)
-                    if r is None:
-                        continue
-                    x_, y_, w_, h_, conf = r
-                    if conf >= th_val:
-                        hits.append((x_, y_, w_, h_, conf))
-                if not hits:
-                    continue
-                bx, by, bw, bh, uconf = max(hits, key=lambda t: t[4])
-                cand = (uconf, pid, label, bx, by, bw, bh)
+            for ft in feats:
+                if ft.debug:
+                    dbg_rows.append(_feature_debug_row(pid, label, scene, ft))
 
-            candidates.append(cand)
+            box = _eval_page_features(mode, feats, scene, th_val)
+            if box is not None:
+                bx, by, bw, bh, conf = box
+                candidates.append((conf, pid, label, bx, by, bw, bh))
+
+        dbg_tuple = tuple(dbg_rows)
 
         if not candidates:
             if not dbg_tuple:
                 return None
             return PageMatchEnvelope(result=None, template_debug=dbg_tuple)
 
-        # 先看 `page_priority` 顺序（越靠前越高），同级再取置信度最高
-        _conf, pid, label, bx, by, bw, bh = min(
+        conf, pid, label, bx, by, bw, bh = min(
             candidates,
             key=lambda c: (_rank(c[1]), -c[0]),
         )
@@ -371,7 +366,7 @@ class PageTemplateMatcher:
             result=PageMatchResult(
                 page_id=pid,
                 label=label,
-                confidence=float(_conf),
+                confidence=float(conf),
                 x=int(bx),
                 y=int(by),
                 w=int(bw),

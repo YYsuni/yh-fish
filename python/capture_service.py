@@ -84,21 +84,6 @@ def _downscale_preview_max_width(img: Image.Image, max_w: int) -> Image.Image:
     return img.resize((max_w, new_h), Image.Resampling.BILINEAR)
 
 
-def _encode_preview_rgb(cropped: Image.Image) -> bytes:
-    """
-    将裁剪后的 RGB 图编码为 WebP 预览字节。
-    method=WEBP_METHOD：偏小以换更少编码耗时（本地预览延迟优先于极致压缩）。
-    """
-    buf = io.BytesIO()
-    cropped.save(
-        buf,
-        format="WEBP",
-        quality=WEBP_QUALITY,
-        method=WEBP_METHOD,
-    )
-    return buf.getvalue()
-
-
 def _decode_and_crop_rgb(jpeg: bytes, title_top_px: int) -> Image.Image | None:
     """解码 WGC JPEG 并裁客户区（去标题栏与边距），返回 RGB `Image`；失败返回 None。"""
     try:
@@ -117,22 +102,12 @@ def _decode_and_crop_rgb(jpeg: bytes, title_top_px: int) -> Image.Image | None:
 
 
 def _encode_cropped_to_preview(cropped: Image.Image) -> tuple[bytes, int, int]:
-    """将裁剪图按 PREVIEW_MAX_WIDTH 缩小后编码；返回 (字节, 逻辑裁剪宽, 逻辑裁剪高)。"""
+    """将裁剪图按 PREVIEW_MAX_WIDTH 缩小后编码为 WebP；返回 (字节, 逻辑裁剪宽, 逻辑裁剪高)。"""
     cw, ch = cropped.size
     scaled = _downscale_preview_max_width(cropped, PREVIEW_MAX_WIDTH)
-    return _encode_preview_rgb(scaled), cw, ch
-
-
-def _crop_to_preview(
-    jpeg: bytes,
-    title_top_px: int,
-) -> tuple[bytes, int, int] | None:
-    """解码、裁剪并编码预览；宽高为裁剪后的逻辑尺寸（与 `/status` 一致）。"""
-    cropped = _decode_and_crop_rgb(jpeg, title_top_px)
-    if cropped is None:
-        return None
-    raw, cw, ch = _encode_cropped_to_preview(cropped)
-    return raw, cw, ch
+    buf = io.BytesIO()
+    scaled.save(buf, format="WEBP", quality=WEBP_QUALITY, method=WEBP_METHOD)
+    return buf.getvalue(), cw, ch
 
 
 @dataclass
@@ -246,8 +221,7 @@ class CaptureService:
     def get_preview_with_live_fps(self) -> tuple[bytes, float, dict[str, object] | None, int, int]:
         """返回预览字节、FPS、页面匹配（裁剪后坐标）；以及同上帧一致的裁剪宽高。"""
         with self._lock:
-            cw, ch = self._size
-            return self._latest, self._live_fps_unlocked(), self._page_match, cw, ch
+            return self._snapshot_unlocked()
 
     def wait_next_frame(self, timeout_s: float) -> bytes:
         """阻塞直到捕获线程写入新帧或超时，返回当前预览字节。"""
@@ -259,8 +233,7 @@ class CaptureService:
         """同 `wait_next_frame`，额外返回 FPS、页面匹配与同帧裁剪尺寸。"""
         with self._frame_ready:
             self._frame_ready.wait(timeout=timeout_s)
-            cw, ch = self._size
-            return self._latest, self._live_fps_unlocked(), self._page_match, cw, ch
+            return self._snapshot_unlocked()
 
     def get_status(self) -> CaptureStatus:
         """返回 UI/API 需要的窗口与 FPS 摘要。"""
@@ -287,6 +260,12 @@ class CaptureService:
         if dt <= 1e-9:
             return float(n)
         return (n - 1) / dt
+
+    def _snapshot_unlocked(
+        self,
+    ) -> tuple[bytes, float, dict[str, object] | None, int, int]:
+        cw, ch = self._size
+        return self._latest, self._live_fps_unlocked(), self._page_match, cw, ch
 
     def _loop(self) -> None:
         """按 FPS 循环：找窗口 → WGC 快照 → 裁切编码 → 写入 `_latest`。"""
