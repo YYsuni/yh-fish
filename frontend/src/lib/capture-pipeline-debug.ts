@@ -7,7 +7,7 @@ export type PipelineTimingKey = (typeof PIPELINE_KEYS)[number]
 
 export const PIPELINE_LABELS: Record<PipelineTimingKey, string> = {
 	find_hwnd_ms: '查找窗口',
-	decode_ms: '解码（标题栏 + JPEG + 裁剪）',
+	decode_ms: '解码JPEG + 裁剪',
 	template_match_ms: '模板匹配',
 	scale_encode_ms: '缩小 + JPEG 编码'
 }
