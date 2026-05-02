@@ -33,21 +33,21 @@ else:
         return buf.value or ""
 
     def find_game_hwnd(title_regex: str) -> int | None:
-        """枚举顶层可见窗口，返回首个标题匹配正则的 HWND。"""
+        """枚举顶层可见窗口，返回首个标题匹配正则的 HWND（命中即停止枚举）。"""
         pat = re.compile(title_regex)
-        found: list[int] = []
+        out: list[int] = []
 
         def cb(hwnd: int, _l: int) -> bool:
-            """`EnumWindows` 回调：收集匹配的 HWND。"""
+            """`EnumWindows` 回调：取第一个匹配窗口后返回 False 结束枚举。"""
             if not user32.IsWindowVisible(hwnd):
                 return True
-            t = _title(hwnd).strip()
-            if pat.match(t):
-                found.append(hwnd)
+            if pat.match(_title(hwnd).strip()):
+                out.append(hwnd)
+                return False
             return True
 
         user32.EnumWindows(WNDENUMPROC(cb), 0)
-        return found[0] if found else None
+        return out[0] if out else None
 
     def window_title_bar_crop_px(hwnd: int) -> int:
         """从窗口外框顶到客户区顶部的像素高度（标题栏 + 顶边框），与 WGC 整窗帧对齐。"""

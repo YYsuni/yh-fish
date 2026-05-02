@@ -121,10 +121,7 @@ def _eval_page_features(
             continue
         if best is None or conf > best[4]:
             best = (x_, y_, w_, h_, conf)
-    if best is None:
-        return None
-    bx, by, bw, bh, uconf = best
-    return (bx, by, bw, bh, uconf)
+    return best
 
 
 class PageTemplateMatcher:
@@ -134,18 +131,14 @@ class PageTemplateMatcher:
         self._path = pages_json or DEFAULT_PAGES_JSON
         self._threshold = DEFAULT_MATCH_THRESHOLD
         self._loaded = False
-        self._templates_by_pid: dict[str, tuple[str, list[_FeatureTemplate]]] = {}
-        self._priority_rank: dict[str, int] = {}
         # 加载完成后按 page_priority 排好序的 (id, label, features)
         self._pages_ordered: list[tuple[str, str, list[_FeatureTemplate]]] = []
 
     def _ensure_loaded(self) -> None:
-        """懒加载：读 `page_priority` 与 `pages`，填充 `_templates_by_pid` 与 `_pages_ordered`。"""
+        """懒加载：读 `page_priority` 与 `pages`，填充 `_pages_ordered`。"""
         if self._loaded:
             return
         self._loaded = True
-        self._templates_by_pid = {}
-        self._priority_rank = {}
         self._pages_ordered = []
         if not self._path.is_file():
             return
@@ -212,7 +205,6 @@ class PageTemplateMatcher:
             # 仅保留至少有一个可用特征的页面
             if tpl_entries:
                 loaded[pid] = (label, tpl_entries)
-        self._templates_by_pid = loaded
 
         # page_priority 支持写 label 或 id：构建反向映射用于解析与排序
         label_to_pid: dict[str, str] = {}
@@ -230,7 +222,6 @@ class PageTemplateMatcher:
                 continue
             priority_rank[rid] = rank
             rank += 1
-        self._priority_rank = priority_rank
         pri_fb = len(priority_rank) + 10_000
         self._pages_ordered = [
             (pid, lab, fts)
@@ -254,8 +245,6 @@ class PageTemplateMatcher:
     def reload(self) -> None:
         """强制下次 `match` 重新读盘（优先级、模板等均重载）。"""
         self._loaded = False
-        self._priority_rank = {}
-        self._templates_by_pid = {}
         self._pages_ordered = []
         self._ensure_loaded()
 

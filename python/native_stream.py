@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import io
+import sys
 import threading
 import time
 
@@ -13,8 +14,6 @@ from PIL import Image
 
 def native_backend_available() -> bool:
     """当前进程能否导入 `windows_capture`（仅 Win32 有意义）。"""
-    import sys
-
     if sys.platform != "win32":
         return False
     try:

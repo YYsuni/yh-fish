@@ -17,7 +17,6 @@ from page_template_match import PageMatchResult, PageTemplateMatcher
 if sys.platform == "win32":
     from native_stream import WgcHwndStreamer, native_backend_available
 else:
-
     def native_backend_available() -> bool:
         """非 Windows 无 WGC，后端不可用。"""
         return False
@@ -156,8 +155,11 @@ class CaptureService:
         self._page_match: dict[str, object] | None = None
         self._page_matcher = PageTemplateMatcher()
 
-        self._has_wgc = native_backend_available() and sys.platform == "win32"
-        self._wgc = WgcHwndStreamer() if (self._has_wgc and WgcHwndStreamer is not None) else None
+        self._wgc = (
+            WgcHwndStreamer()
+            if (native_backend_available() and WgcHwndStreamer is not None)
+            else None
+        )
 
     def preview_mime(self) -> str:
         """当前预览帧 MIME。"""
