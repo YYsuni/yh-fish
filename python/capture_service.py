@@ -32,7 +32,7 @@ WEBP_QUALITY = 78
 WEBP_METHOD = 3  # WebP：method 0~6，数值越小编码越快，预览优先低延迟
 CROP_MARGIN_LR_PX = 2
 CROP_MARGIN_BOTTOM_PX = 2
-PREVIEW_MAX_WIDTH = 600  # 先缩小再编码，减体积与编码耗时
+PREVIEW_MAX_WIDTH = 800  # 先缩小再编码，减体积与编码耗时
 FPS_MIN = 1.0
 FPS_MAX = 60.0
 LIVE_FPS_WINDOW_S = 1.0
@@ -170,7 +170,7 @@ class CaptureService:
             return self._fps
 
     def set_page_match_threshold(self, threshold: float) -> float:
-        """设置 OpenCV 模板匹配下限（0–1）；立即作用于后续帧。"""
+        """设置 OpenCV 模板匹配下限（0–1）；"""
         return self._page_matcher.set_match_threshold(threshold)
 
     def mjpeg_sleep_s(self) -> float:

@@ -103,82 +103,63 @@ def _match_template_in_roi(
 
 
 def _eval_page_features(
-    mode: str,
     feats: list[_FeatureTemplate],
     scene: np.ndarray,
     th_val: float,
 ) -> tuple[int, int, int, int, float] | None:
-    """单页：按 match_mode 聚合特征匹配；成功返回 (bx, by, bw, bh, confidence)。"""
-    if mode == "all":
-        matched: list[tuple[int, int, int, int, float]] = []
-        for ft in feats:
-            r = _match_template_in_roi(scene, ft.region_cropped, ft.tpl_rgb)
-            if r is None or r[4] < th_val:
-                return None
-            matched.append(r)
-        xs = [t[0] for t in matched]
-        ys = [t[1] for t in matched]
-        xe = [t[0] + t[2] for t in matched]
-        ye = [t[1] + t[3] for t in matched]
-        ux0, uy0, ux1, uy1 = min(xs), min(ys), max(xe), max(ye)
-        bx, by = ux0, uy0
-        bw, bh = ux1 - ux0, uy1 - uy0
-        return (bx, by, bw, bh, min(t[4] for t in matched))
+    """单页：多特征中取 TM_CCOEFF_NORMED 过阈值且置信度最高的一条；成功返回 (bx, by, bw, bh, confidence)。"""
+    if not feats:
+        return None
 
-    hits: list[tuple[int, int, int, int, float]] = []
+    best: tuple[int, int, int, int, float] | None = None
     for ft in feats:
         r = _match_template_in_roi(scene, ft.region_cropped, ft.tpl_rgb)
         if r is None:
             continue
         x_, y_, w_, h_, conf = r
-        if conf >= th_val:
-            hits.append((x_, y_, w_, h_, conf))
-    if not hits:
+        if conf < th_val:
+            continue
+        if best is None or conf > best[4]:
+            best = (x_, y_, w_, h_, conf)
+    if best is None:
         return None
-    bx, by, bw, bh, uconf = max(hits, key=lambda t: t[4])
+    bx, by, bw, bh, uconf = best
     return (bx, by, bw, bh, uconf)
 
 
 class PageTemplateMatcher:
-    """懒加载配置与模板；`match` 线程安全仅当单线程调用（当前由捕获线程独占）。"""
+    """懒加载配置与模板；`match` 按 `_pages_ordered` 顺序短路。线程安全仅当单线程调用。"""
 
     def __init__(self, pages_json: Path | None = None) -> None:
         self._path = pages_json or DEFAULT_PAGES_JSON
         self._threshold = DEFAULT_MATCH_THRESHOLD
-        self._pre_crop_top_px = DEFAULT_PRE_CROP_TOP_PX
-        self._pre_crop_left_px = DEFAULT_PRE_CROP_LEFT_PX
         self._loaded = False
-        # `page_priority` 反向映射：pid -> rank（越小越优先）
+        self._templates_by_pid: dict[str, tuple[str, list[_FeatureTemplate]]] = {}
         self._priority_rank: dict[str, int] = {}
-        # pid -> (label, match_mode, features[])
-        self._templates_by_pid: dict[str, tuple[str, str, list[_FeatureTemplate]]] = {}
+        # 加载完成后按 page_priority 排好序的 (id, label, features)
+        self._pages_ordered: list[tuple[str, str, list[_FeatureTemplate]]] = []
 
     def _ensure_loaded(self) -> None:
+        """懒加载：读 `page_priority` 与 `pages`，填充 `_templates_by_pid` 与 `_pages_ordered`。"""
         if self._loaded:
             return
         self._loaded = True
+        self._templates_by_pid = {}
+        self._priority_rank = {}
+        self._pages_ordered = []
         if not self._path.is_file():
-            self._priority_rank = {}
-            self._templates_by_pid = {}
             return
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            self._priority_rank = {}
-            self._templates_by_pid = {}
             return
         base = self._path.parent
         raw_pri = data.get("page_priority") if isinstance(data, dict) else None
-        pri_tokens = (
-            [s for x in raw_pri if (s := str(x).strip())]
-            if isinstance(raw_pri, list)
-            else []
-        )
+        pri_tokens = [s for x in raw_pri if (s := str(x).strip())] if isinstance(raw_pri, list) else []
         pages = data.get("pages") if isinstance(data, dict) else None
         if not isinstance(pages, list):
-            self._templates_by_pid = {}
             return
-        loaded: dict[str, tuple[str, str, list[_FeatureTemplate]]] = {}
+        loaded: dict[str, tuple[str, list[_FeatureTemplate]]] = {}
         for p in pages:
             if not isinstance(p, dict):
                 continue
@@ -186,9 +167,6 @@ class PageTemplateMatcher:
             if not pid:
                 continue
             label = str(p.get("label") or pid or "unknown")
-            mode = str(p.get("match_mode") or "any").lower()
-            if mode not in ("any", "all"):
-                mode = "any"
             feats = p.get("features")
             if not isinstance(feats, list):
                 continue
@@ -213,12 +191,11 @@ class PageTemplateMatcher:
                 if not isinstance(rect, list) or len(rect) != 4:
                     continue
                 # pages.json 的 region 基于“未裁剪前整窗截图”，需要先减去捕获侧默认裁剪量
-                # 以对齐 `CaptureService` 传入的 cropped_rgb 坐标系。
                 try:
                     rect_adj = _apply_pre_crop_offset(
                         rect,
-                        left_px=self._pre_crop_left_px,
-                        top_px=self._pre_crop_top_px,
+                        left_px=DEFAULT_PRE_CROP_LEFT_PX,
+                        top_px=DEFAULT_PRE_CROP_TOP_PX,
                     )
                     rx, ry, rw, rh = (int(round(float(v))) for v in rect_adj)
                 except (TypeError, ValueError):
@@ -232,13 +209,14 @@ class PageTemplateMatcher:
                         tpl_rgb=arr,
                     )
                 )
+            # 仅保留至少有一个可用特征的页面
             if tpl_entries:
-                loaded[pid] = (label, mode, tpl_entries)
+                loaded[pid] = (label, tpl_entries)
         self._templates_by_pid = loaded
 
         # page_priority 支持写 label 或 id：构建反向映射用于解析与排序
         label_to_pid: dict[str, str] = {}
-        for pid, (lab, _mode, _feats) in loaded.items():
+        for pid, (lab, _feats) in loaded.items():
             if lab and lab not in label_to_pid:
                 label_to_pid[lab] = pid
 
@@ -253,6 +231,14 @@ class PageTemplateMatcher:
             priority_rank[rid] = rank
             rank += 1
         self._priority_rank = priority_rank
+        pri_fb = len(priority_rank) + 10_000
+        self._pages_ordered = [
+            (pid, lab, fts)
+            for pid, (lab, fts) in sorted(
+                loaded.items(),
+                key=lambda it: (priority_rank.get(it[0], pri_fb), it[0]),
+            )
+        ]
 
     def get_match_threshold(self) -> float:
         """TM_CCOEFF_NORMED 判定下限，约 [0,1]。"""
@@ -270,47 +256,37 @@ class PageTemplateMatcher:
         self._loaded = False
         self._priority_rank = {}
         self._templates_by_pid = {}
+        self._pages_ordered = []
         self._ensure_loaded()
 
     def match(self, cropped_rgb: Image.Image) -> PageMatchResult | None:
         """在各特征的 region ROI 内对整张模板 PNG 做匹配；矩形为裁剪坐标系像素。"""
         self._ensure_loaded()
-        if not self._templates_by_pid:
+        if not self._pages_ordered:
             return None
         cw, ch = cropped_rgb.size
+        # 过小图像无法稳定做模板相关匹配，避免无意义计算
         if cw < 8 or ch < 8:
             return None
 
+        # 统一为 RGB 的 H×W×3 uint8，与特征评估函数约定一致
         scene = np.asarray(cropped_rgb.convert("RGB"))
         if scene.ndim != 3 or scene.shape[2] != 3:
             return None
         th_val = self._threshold
 
-        candidates: list[tuple[float, str, str, int, int, int, int]] = []
-        pri_len = len(self._priority_rank)
-
-        def _rank(pg_id: str) -> int:
-            return self._priority_rank.get(pg_id, pri_len + 10_000)
-
-        for pid, (label, mode, feats) in self._templates_by_pid.items():
-            box = _eval_page_features(mode, feats, scene, th_val)
-            if box is not None:
-                bx, by, bw, bh, conf = box
-                candidates.append((conf, pid, label, bx, by, bw, bh))
-
-        if not candidates:
-            return None
-
-        conf, pid, label, bx, by, bw, bh = min(
-            candidates,
-            key=lambda c: (_rank(c[1]), -c[0]),
-        )
-        return PageMatchResult(
-            page_id=pid,
-            label=label,
-            confidence=float(conf),
-            x=int(bx),
-            y=int(by),
-            w=int(bw),
-            h=int(bh),
-        )
+        for pid, label, feats in self._pages_ordered:
+            box = _eval_page_features(feats, scene, th_val)
+            if box is None:
+                continue
+            bx, by, bw, bh, conf = box
+            return PageMatchResult(
+                page_id=pid,
+                label=label,
+                confidence=float(conf),
+                x=int(bx),
+                y=int(by),
+                w=int(bw),
+                h=int(bh),
+            )
+        return None

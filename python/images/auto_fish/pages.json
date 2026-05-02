@@ -11,15 +11,12 @@
     "无鱼饵状态"
   ],
   "meta": {
-    "priority": "page_priority：按需填写与本文件 pages[].label 完全一致的字符串，数组越靠前优先级越高；多页匹配同时成立时按此顺序择优。亦兼容直接写页面的 id（如 fish-hooked）。未出现在数组内的页面视作最低优先级。",
-    "debug": "特征可以设置 debug: true",
-    "match_mode": "match_mode：any 表示任意一个特征匹配成功即可，all 表示所有特征匹配成功才行"
+    "priority": "page_priority：按需填写与本文件 pages[].label 完全一致的字符串，数组越靠前优先级越高；多页匹配同时成立时按此顺序择优。亦兼容直接写页面的 id（如 fish-hooked）。未出现在数组内的页面视作最低优先级。"
   },
   "pages": [
     {
       "id": "reeling",
       "label": "正在溜鱼页面",
-      "match_mode": "any",
       "features": [
         {
           "file": "鱼耐力.png",
@@ -30,7 +27,6 @@
     {
       "id": "start-fishing",
       "label": "开始钓鱼页面",
-      "match_mode": "any",
       "features": [
         {
           "file": "鱼饵图标.png",
@@ -41,7 +37,6 @@
     {
       "id": "waiting-for-bite",
       "label": "等待咬钩页面",
-      "match_mode": "any",
       "features": [
         {
           "file": "鱼钩图标.png",
@@ -52,7 +47,6 @@
     {
       "id": "fishing-prep",
       "label": "钓鱼准备页面",
-      "match_mode": "any",
       "features": [
         {
           "file": "开始钓鱼.png",
@@ -67,7 +61,6 @@
     {
       "id": "fishing-end",
       "label": "钓鱼结束页面",
-      "match_mode": "any",
       "features": [
         {
           "file": "点击空白区域关闭.png",
@@ -78,7 +71,6 @@
     {
       "id": "fishing-interact",
       "label": "钓鱼交互页面",
-      "match_mode": "any",
       "features": [
         {
           "file": "钓鱼.png",
@@ -89,7 +81,6 @@
     {
       "id": "fish-hooked",
       "label": "上钩页面",
-      "match_mode": "any",
       "features": [
         {
           "file": "鱼儿上钩了.png",
@@ -100,7 +91,6 @@
     {
       "id": "fish-escaped",
       "label": "鱼儿溜走页面",
-      "match_mode": "any",
       "features": [
         {
           "file": "鱼儿溜走了.png",
@@ -111,7 +101,6 @@
     {
       "id": "no-bait",
       "label": "无鱼饵状态",
-      "match_mode": "any",
       "features": [
         {
           "file": "鱼饵才可以钓鱼.png",
@@ -119,6 +108,6 @@
         }
       ]
     }
-  
+
   ]
 }
