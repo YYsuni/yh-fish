@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
-"""游戏窗口捕获：WGC 取整窗 JPEG → 裁标题栏与边缘 → 编码为预览格式并按 FPS 更新最新帧。"""
+"""游戏窗口捕获：WGC 取整窗 JPEG → 裁标题栏与边缘 → 编码为 WebP 预览并按 FPS 更新最新帧。"""
 
 from __future__ import annotations
 
 import io
-import os
 import sys
 import threading
 import time
@@ -26,22 +25,20 @@ else:
     WgcHwndStreamer = None
 
 DEFAULT_TITLE_REGEX = r"^\s*(异环|NTE)\s*$"
-JPEG_QUALITY = 72
+# WGC 管线内仍用 JPEG 快照（Windows 捕获）；发给前端的预览固定为 WebP。
+WGC_JPEG_QUALITY = 72
+# 以下为发给浏览器/WebSocket 的预览图参数；模板匹配在裁剪后的 RGB 上做，不经过这些编码。
 WEBP_QUALITY = 78
-WEBP_METHOD = 3
+WEBP_METHOD = 3  # WebP：method 0~6，数值越小编码越快，预览优先低延迟
 CROP_MARGIN_LR_PX = 2
 CROP_MARGIN_BOTTOM_PX = 2
-PREVIEW_MAX_WIDTH = 600
+PREVIEW_MAX_WIDTH = 600  # 先缩小再编码，减体积与编码耗时
 FPS_MIN = 1.0
 FPS_MAX = 60.0
 LIVE_FPS_WINDOW_S = 1.0
 
-_requested_codec = os.environ.get("YH_FISH_PREVIEW_CODEC", "jpeg").strip().lower()
-if _requested_codec not in ("jpeg", "webp"):
-    _requested_codec = "jpeg"
 
-
-def _webp_supported() -> bool:
+def _webp_encode_supported() -> bool:
     """检测当前 Pillow 是否具备 WEBP 编码（依赖 libwebp）。"""
     try:
         Image.new("RGB", (4, 4)).save(io.BytesIO(), format="WEBP")
@@ -50,14 +47,9 @@ def _webp_supported() -> bool:
         return False
 
 
-_effective_preview_codec = "webp" if _requested_codec == "webp" and _webp_supported() else "jpeg"
-if _requested_codec == "webp" and _effective_preview_codec != "webp":
-    print(
-        "YH_FISH_PREVIEW_CODEC=webp 但当前 Pillow 不支持 WEBP 编码，已回退为 jpeg",
-        file=sys.stderr,
-    )
+if not _webp_encode_supported():
+    raise RuntimeError("Pillow 无法编码 WEBP（需构建时链接 libwebp）。预览仅支持 WebP，请安装带 WebP 的 Pillow。")
 
-_placeholder_jpeg_cache: bytes | None = None
 _placeholder_webp_cache: bytes | None = None
 
 
@@ -68,25 +60,19 @@ def _clamp_fps(v: float) -> float:
 
 def current_preview_mime() -> str:
     """预览二进制帧的 MIME（WS / MJPEG 分片 Content-Type）。"""
-    return "image/webp" if _effective_preview_codec == "webp" else "image/jpeg"
+    return "image/webp"
 
 
 def _placeholder_preview() -> bytes:
-    """无窗口或捕获失败时的占位图（与当前预览编码一致）。"""
-    global _placeholder_jpeg_cache, _placeholder_webp_cache
-    img = Image.new("RGB", (640, 360), (248, 250, 252))
-    img = _downscale_preview_max_width(img, PREVIEW_MAX_WIDTH)
-    if _effective_preview_codec == "webp":
-        if _placeholder_webp_cache is None:
-            buf = io.BytesIO()
-            img.save(buf, format="WEBP", quality=70, method=WEBP_METHOD)
-            _placeholder_webp_cache = buf.getvalue()
-        return _placeholder_webp_cache
-    if _placeholder_jpeg_cache is None:
+    """无窗口或捕获失败时的占位图（WebP）。"""
+    global _placeholder_webp_cache
+    if _placeholder_webp_cache is None:
+        img = Image.new("RGB", (640, 360), (248, 250, 252))
+        img = _downscale_preview_max_width(img, PREVIEW_MAX_WIDTH)
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=70)
-        _placeholder_jpeg_cache = buf.getvalue()
-    return _placeholder_jpeg_cache
+        img.save(buf, format="WEBP", quality=70, method=WEBP_METHOD)
+        _placeholder_webp_cache = buf.getvalue()
+    return _placeholder_webp_cache
 
 
 def _downscale_preview_max_width(img: Image.Image, max_w: int) -> Image.Image:
@@ -100,20 +86,16 @@ def _downscale_preview_max_width(img: Image.Image, max_w: int) -> Image.Image:
 
 def _encode_preview_rgb(cropped: Image.Image) -> bytes:
     """
-    将裁剪后的 RGB 图编码为预览字节。
-    JPEG：optimize=False，降低 CPU；WebP：method=WEBP_METHOD，偏小 method 换更少编码耗时。
-    本地环回带宽通常不是瓶颈，编码耗时更易拖累端到端帧延迟。
+    将裁剪后的 RGB 图编码为 WebP 预览字节。
+    method=WEBP_METHOD：偏小以换更少编码耗时（本地预览延迟优先于极致压缩）。
     """
     buf = io.BytesIO()
-    if _effective_preview_codec == "webp":
-        cropped.save(
-            buf,
-            format="WEBP",
-            quality=WEBP_QUALITY,
-            method=WEBP_METHOD,
-        )
-    else:
-        cropped.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=False)
+    cropped.save(
+        buf,
+        format="WEBP",
+        quality=WEBP_QUALITY,
+        method=WEBP_METHOD,
+    )
     return buf.getvalue()
 
 
@@ -323,10 +305,10 @@ class CaptureService:
 
             hwnd = find_game_hwnd(self._title_regex)
             if hwnd is None:
-                self._wgc.ensure_hwnd(None, quality=JPEG_QUALITY, min_interval_ms=min_iv)
+                self._wgc.ensure_hwnd(None, quality=WGC_JPEG_QUALITY, min_interval_ms=min_iv)
                 self._set_frame(_placeholder_preview(), None, 0, 0, None)
             else:
-                self._wgc.ensure_hwnd(hwnd, quality=JPEG_QUALITY, min_interval_ms=min_iv)
+                self._wgc.ensure_hwnd(hwnd, quality=WGC_JPEG_QUALITY, min_interval_ms=min_iv)
                 data, w, h, _ = self._wgc.get_snapshot()
                 if data:
                     chop = window_title_bar_crop_px(hwnd)

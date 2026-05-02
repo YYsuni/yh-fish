@@ -86,7 +86,7 @@ export function CapturePreviewSection() {
 	const fpsSyncedOnce = useRef(false)
 	const matchThSyncedOnce = useRef(false)
 	const canvasRef = useRef<HTMLCanvasElement>(null)
-	const previewMimeRef = useRef('image/jpeg')
+	const previewMimeRef = useRef('image/webp')
 
 	const refreshCapture = useCallback(async () => {
 		try {
