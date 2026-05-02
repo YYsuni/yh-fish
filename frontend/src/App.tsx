@@ -1,14 +1,19 @@
-import { Cursor, Footer, Time } from 'animal-island-ui'
+import { Cursor } from 'animal-island-ui'
 import { AppErrorBoundary } from './components/app-error-boundary'
-import { CapturePreviewSection } from './components/capture-preview-section'
+import { CaptureLeftPanel } from './components/capture-left-panel'
+import { CaptureRightPanel } from './components/capture-right-panel'
+import { CaptureSessionProvider } from './components/capture-session-context'
 
 function App() {
 	return (
 		<AppErrorBoundary>
 			<Cursor>
-				<main className='flex flex-1 justify-center p-4'>
-					<CapturePreviewSection />
-				</main>
+				<CaptureSessionProvider>
+					<main className='mx-auto grid h-full w-[800px] grid-cols-2 gap-6 p-4'>
+						<CaptureLeftPanel />
+						<CaptureRightPanel />
+					</main>
+				</CaptureSessionProvider>
 			</Cursor>
 		</AppErrorBoundary>
 	)

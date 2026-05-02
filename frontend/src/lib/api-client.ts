@@ -60,3 +60,34 @@ export function postCaptureMatchThreshold(threshold: number) {
 		body: JSON.stringify({ threshold })
 	})
 }
+
+export type AutoFishStatusResponse = {
+	running: boolean
+	last_page_id: string | null
+}
+
+export function getAutoFishStatus() {
+	return fetchJson<AutoFishStatusResponse>('/api/auto-fish/status')
+}
+
+export function postAutoFishStart() {
+	return fetchJson<{ running: boolean; started: boolean }>('/api/auto-fish/start', {
+		method: 'POST',
+		body: JSON.stringify({})
+	})
+}
+
+export function postAutoFishStop() {
+	return fetchJson<{ running: boolean }>('/api/auto-fish/stop', {
+		method: 'POST',
+		body: JSON.stringify({})
+	})
+}
+
+export type MsgLogLine = { t: number; m: string }
+
+export type MsgLogResponse = { lines: MsgLogLine[] }
+
+export function getMsgLog() {
+	return fetchJson<MsgLogResponse>('/api/msg/log')
+}

@@ -11,6 +11,7 @@ from pathlib import Path
 import uvicorn
 import webview
 
+from auto_fish_executor import AutoFishExecutor
 from capture_service import CaptureService
 from server import create_app
 
@@ -49,14 +50,15 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
     cap = CaptureService()
-    app = create_app(capture=cap, serve_static=static, dist_dir=d)
+    fish = AutoFishExecutor(cap)
+    app = create_app(capture=cap, auto_fish=fish, serve_static=static, dist_dir=d)
 
     srv = uvicorn.Server(uvicorn.Config(app, host=args.host, port=args.port, log_level="info", access_log=False))
     threading.Thread(target=srv.run, daemon=True).start()
     time.sleep(0.35)
 
     url = args.url if args.dev else f"http://{args.host}:{args.port}"
-    webview.create_window("异环钓鱼", url, width=480, height=520, min_size=(480, 520), resizable=True)
+    webview.create_window("异环钓鱼", url, width=960, height=600, min_size=(480, 520), resizable=True)
 
     try:
         webview.start()

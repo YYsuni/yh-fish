@@ -1,5 +1,18 @@
-import { Button, Card, Divider, Icon, Input } from 'animal-island-ui'
-import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import {
+	type Dispatch,
+	type ReactNode,
+	type RefObject,
+	type SetStateAction,
+	createContext,
+	useCallback,
+	useContext,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState
+} from 'react'
+import type { CSSProperties } from 'react'
 import {
 	type CaptureStatusResponse,
 	type PageMatchPayload,
@@ -10,16 +23,14 @@ import {
 	postCaptureMatchThreshold
 } from '../lib/api-client'
 import { normalizePipelineMs } from '../lib/capture-pipeline-debug'
-import { CapturePipelineDebugPanel } from './capture-pipeline-debug-panel'
 
 const FPS_MIN = 1
 const FPS_MAX = 60
 const MATCH_TH_MIN = 0
 const MATCH_TH_MAX = 1
-/** 二进制帧：`float32 BE` FPS + `uint32 BE` meta UTF-8 字节数 + JSON + 图像 */
 const WS_PREVIEW_HEADER_BYTES = 8
 
-function parsePageMatch(raw: unknown): PageMatchPayload {
+export function parsePageMatch(raw: unknown): PageMatchPayload {
 	if (raw == null || typeof raw !== 'object') return null
 	const o = raw as Record<string, unknown>
 	const x = Math.round(Number(o.x))
@@ -40,7 +51,7 @@ function parsePageMatch(raw: unknown): PageMatchPayload {
 	}
 }
 
-function formatLiveFpsLabel(liveFps: number | null): string {
+export function formatLiveFpsLabel(liveFps: number | null): string {
 	if (liveFps == null || liveFps < 0.05) return '— FPS'
 	return `${liveFps >= 10 ? Math.round(liveFps) : liveFps.toFixed(1)} FPS`
 }
@@ -50,7 +61,6 @@ type DraftSaving = { draft: number; saving: boolean }
 type PreviewOverlay = {
 	liveFps: number | null
 	pageMatch: PageMatchPayload
-	/** 与 page_match 同帧的裁剪后逻辑尺寸（WS meta 或与轮询 capture 对齐） */
 	cropDims: { w: number; h: number } | null
 	pipelineMs: PipelineMsPayload | null
 }
@@ -62,7 +72,28 @@ const initialPreviewOverlay: PreviewOverlay = {
 	pipelineMs: null
 }
 
-export function CapturePreviewSection() {
+export type CaptureSessionContextValue = {
+	capture: CaptureStatusResponse | null
+	error: string | null
+	preview: PreviewOverlay
+	fps: DraftSaving
+	setFps: Dispatch<SetStateAction<DraftSaving>>
+	matchTh: DraftSaving
+	setMatchTh: Dispatch<SetStateAction<DraftSaving>>
+	canvasRef: RefObject<HTMLCanvasElement | null>
+	matchBoxCss: CSSProperties | null
+	applyCaptureSettings: () => Promise<void>
+}
+
+const CaptureSessionContext = createContext<CaptureSessionContextValue | null>(null)
+
+export function useCaptureSession(): CaptureSessionContextValue {
+	const v = useContext(CaptureSessionContext)
+	if (v == null) throw new Error('useCaptureSession must be used within CaptureSessionProvider')
+	return v
+}
+
+export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 	const [capture, setCapture] = useState<CaptureStatusResponse | null>(null)
 	const [error, setError] = useState<string | null>(null)
 	const [streamKey, setStreamKey] = useState(0)
@@ -138,7 +169,6 @@ export function CapturePreviewSection() {
 			setMatchBoxCss(null)
 			return
 		}
-		// page_match 为裁剪像素；画布位图为缩小预览，先映射到位图像素再按比例放入 object-contain
 		const bx = (pageMatch.x * bmpW) / cropW
 		const by = (pageMatch.y * bmpH) / cropH
 		const bwR = (pageMatch.w * bmpW) / cropW
@@ -205,7 +235,6 @@ export function CapturePreviewSection() {
 			}
 
 			const imageBuf = buf.slice(WS_PREVIEW_HEADER_BYTES + metaLen)
-
 			const mime = previewMimeRef.current
 			try {
 				const blob = new Blob([imageBuf], { type: mime })
@@ -282,96 +311,39 @@ export function CapturePreviewSection() {
 		}
 	}, [matchTh.draft, refreshCapture])
 
-	const summaryMatch = pageMatch ?? parsePageMatch(capture?.page_match ?? null)
+	const applyCaptureSettings = useCallback(async () => {
+		await applyFps()
+		await applyMatchThreshold()
+	}, [applyFps, applyMatchThreshold])
 
-	return (
-		<section className='mb-8 w-full max-w-md'>
-			<div className='mb-3 flex items-center gap-2'>
-				<Icon name='icon-camera' size={26} bounce />
-				<span className='font-medium'>窗口捕获预览</span>
-			</div>
-
-			<div className='relative w-full'>
-				<canvas ref={canvasRef} className='block max-h-[480px] w-full rounded-md bg-[#e8e4d4] object-contain' />
-				<div
-					className='pointer-events-none absolute top-2 left-2 z-10 rounded-lg bg-[#8ac68a]/95 px-2.5 py-1 text-xs leading-none font-medium tracking-tight text-white shadow-sm'
-					aria-live='polite'>
-					{formatLiveFpsLabel(liveFps)}
-				</div>
-				{matchBoxCss && <div className='pointer-events-none absolute z-9 rounded-sm ring-2 ring-[#fc736d]' style={matchBoxCss} aria-hidden />}
-			</div>
-
-			{error != null && error !== '' && (
-				<Card color='app-red' className='mt-4 p-3'>
-					<p className='text-sm'>{error}</p>
-				</Card>
-			)}
-
-			<Divider className='my-4' type='line-brown' />
-
-			<div className='grid grid-cols-2 gap-4'>
-				<div className='flex flex-col gap-1'>
-					<label htmlFor='capture-fps' className='text-xs font-medium text-[#725d42]'>
-						帧率（FPS）: {fps.draft}
-					</label>
-					<input
-						id='capture-fps'
-						type='range'
-						min={FPS_MIN}
-						max={FPS_MAX}
-						value={fps.draft}
-						onChange={e => setFps(f => ({ ...f, draft: Number(e.target.value) }))}
-						className='w-full accent-[#725d42]'
-					/>
-				</div>
-				<div className='flex flex-col gap-1'>
-					<label htmlFor='capture-match-th' className='text-xs font-medium text-[#725d42]'>
-						页面匹配阈值（0–1）: {matchTh.draft.toFixed(2)}
-					</label>
-					<input
-						id='capture-match-th'
-						type='range'
-						min={MATCH_TH_MIN}
-						max={MATCH_TH_MAX}
-						step={0.1}
-						value={matchTh.draft}
-						onChange={e => setMatchTh(m => ({ ...m, draft: Number(e.target.value) }))}
-						className='w-full accent-[#725d42]'
-					/>
-				</div>
-			</div>
-
-			<Button
-				type='primary'
-				block
-				className='mt-4'
-				size='small'
-				htmlType='button'
-				loading={fps.saving}
-				disabled={fps.saving}
-				onClick={() => {
-					void applyFps()
-					void applyMatchThreshold()
-				}}>
-				应用
-			</Button>
-
-			<div className='mt-6 grid grid-cols-2 gap-3'>
-				<Card color='app-teal' className='p-3'>
-					<p className='text-xs font-medium tracking-wider uppercase opacity-90'>页面识别</p>
-					<p className='mt-1 text-sm font-medium'>{summaryMatch?.page_label || '—'}</p>
-					<p className='mt-1 font-mono text-xs opacity-90'>
-						{summaryMatch && summaryMatch.w > 0 ? `x=${summaryMatch.x} y=${summaryMatch.y} w=${summaryMatch.w} h=${summaryMatch.h}` : '—'}
-					</p>
-					<p className='mt-1 font-mono text-xs opacity-90'>相似度：{summaryMatch?.similarity.toFixed(4)}</p>
-				</Card>
-				<Card color='app-blue' className='p-3'>
-					<p className='text-xs font-medium tracking-wider uppercase opacity-90'>窗口尺寸</p>
-					<p className='mt-1 font-mono text-sm font-medium'>{capture && capture.width > 0 ? `${capture.width} × ${capture.height}` : '—'}</p>
-				</Card>
-			</div>
-
-			<CapturePipelineDebugPanel pipelineMs={pipelineMs} />
-		</section>
+	const value = useMemo<CaptureSessionContextValue>(
+		() => ({
+			capture,
+			error,
+			preview: { liveFps, pageMatch, cropDims, pipelineMs },
+			fps,
+			setFps,
+			matchTh,
+			setMatchTh,
+			canvasRef,
+			matchBoxCss,
+			applyCaptureSettings
+		}),
+		[
+			capture,
+			error,
+			liveFps,
+			pageMatch,
+			cropDims,
+			pipelineMs,
+			fps,
+			matchTh,
+			matchBoxCss,
+			applyCaptureSettings
+		]
 	)
+
+	return <CaptureSessionContext.Provider value={value}>{children}</CaptureSessionContext.Provider>
 }
+
+export { FPS_MIN, FPS_MAX, MATCH_TH_MIN, MATCH_TH_MAX }

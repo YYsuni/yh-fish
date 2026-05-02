@@ -14,7 +14,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from auto_fish_executor import AutoFishExecutor
 from capture_service import CaptureService
+from exec_msg import snapshot as msg_snapshot
 
 WS_PREVIEW_HEADER = struct.Struct('>fI')  # 实测 FPS + UTF-8 JSON meta（page_match、crop 尺寸）字节长度
 
@@ -34,6 +36,7 @@ class SetMatchThresholdBody(BaseModel):
 def create_app(
     *,
     capture: CaptureService,
+    auto_fish: AutoFishExecutor,
     serve_static: bool,
     dist_dir: Path,
 ) -> FastAPI:
@@ -44,6 +47,7 @@ def create_app(
         """进程生命周期内启动/停止捕获后台线程。"""
         capture.start_background()
         yield
+        auto_fish.stop()
         capture.stop_background()
 
     app = FastAPI(title="yh-fish", version="0.1.0", lifespan=lifespan)
@@ -86,6 +90,26 @@ def create_app(
     def cap_set_match_threshold(body: SetMatchThresholdBody) -> dict[str, float]:
         """设置页面模板匹配的相似度下限（0–1，越大越苛刻）。"""
         return {"page_match_threshold": capture.set_page_match_threshold(body.threshold)}
+
+    @app.get("/api/auto-fish/status")
+    def auto_fish_status() -> dict[str, object]:
+        """自动钓鱼执行器是否在跑、最近一次识别到的 page_id。"""
+        return auto_fish.status_dict()
+
+    @app.post("/api/auto-fish/start")
+    def auto_fish_start() -> dict[str, object]:
+        """启动自动钓鱼轮询线程（幂等：已在跑则 `started: false`）。"""
+        return auto_fish.start()
+
+    @app.post("/api/auto-fish/stop")
+    def auto_fish_stop() -> dict[str, object]:
+        """停止自动钓鱼线程。"""
+        return auto_fish.stop()
+
+    @app.get("/api/msg/log")
+    def msg_log() -> dict[str, Any]:
+        """执行过程文本行（时间戳 + 文案），供前端终端面板轮询。"""
+        return {"lines": msg_snapshot()}
 
     @app.websocket("/api/capture/ws")
     async def cap_ws(ws: WebSocket) -> None:
