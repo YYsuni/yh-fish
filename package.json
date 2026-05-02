@@ -3,11 +3,12 @@
 	"version": "1.0.0",
 	"main": "index.js",
 	"devDependencies": {
+		"concurrently": "^9.1.2",
 		"prettier": "^3.8.3",
 		"prettier-plugin-tailwindcss": "^0.8.0"
 	},
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1"
+		"dev": "concurrently -n frontend,python -c cyan,magenta \"pnpm --dir frontend dev\" \"node scripts/dev-python.mjs\""
 	},
 	"keywords": [],
 	"author": "",

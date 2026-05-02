@@ -20,7 +20,7 @@ if sys.platform == "win32":
 else:
 
     def native_backend_available() -> bool:
-        """非 Windows 无 WGC，视为后端不可用。"""
+        """非 Windows 无 WGC，后端不可用。"""
         return False
 
     WgcHwndStreamer = None

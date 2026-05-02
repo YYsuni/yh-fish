@@ -12,9 +12,7 @@ export type TemplateDebugEntry = {
 export type PageMatchPayload = {
 	page_id: string
 	page_label: string
-	/** OpenCV TM_CCOEFF_NORMED 峰值，约 [0,1]；解析时兼容历史字段 confidence */
 	similarity: number
-	/** 与 `/api/capture/status` 中 width×height 同坐标系（裁标题栏与边距后的客户区像素） */
 	x: number
 	y: number
 	w: number
@@ -30,11 +28,9 @@ export type CaptureStatusResponse = {
 	fps: number
 	preview_mime: string
 	page_match: PageMatchPayload
-	/** OpenCV 模板匹配判定下限 TM_CCOEFF_NORMED，约 [0,1] */
 	page_match_threshold: number
 }
 
-/** 与当前页面同源；开发时代理由 Vite 转发 WS */
 export function getCaptureWsUrl(): string {
 	const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
 	return `${proto}//${window.location.host}/api/capture/ws`
