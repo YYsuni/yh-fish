@@ -8,6 +8,9 @@ export type PageMatchPayload = {
 	h: number
 } | null
 
+/** 与后端 `capture_pipeline_debug.PIPELINE_TIMING_KEYS` 对齐的毫秒耗时（缺省键按 0） */
+export type PipelineMsPayload = Record<string, number>
+
 export type CaptureStatusResponse = {
 	ok: boolean
 	hwnd: number | null
@@ -17,6 +20,7 @@ export type CaptureStatusResponse = {
 	preview_mime: string
 	page_match: PageMatchPayload
 	page_match_threshold: number
+	pipeline_ms?: PipelineMsPayload
 }
 
 export function getCaptureWsUrl(): string {

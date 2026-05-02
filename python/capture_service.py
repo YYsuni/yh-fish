@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""游戏窗口捕获：WGC 取整窗 JPEG → 裁标题栏与边缘 → 编码为 WebP 预览并按 FPS 更新最新帧。"""
+"""游戏窗口捕获：WGC 取整窗 JPEG → 裁标题栏与边缘 → 编码为 JPEG 预览并按 FPS 更新最新帧。"""
 
 from __future__ import annotations
 
@@ -12,6 +12,11 @@ from dataclasses import dataclass
 
 from PIL import Image
 
+from capture_pipeline_debug import (
+    empty_pipeline_timings,
+    merge_pipeline_timings,
+    perf_elapsed_ms,
+)
 from page_template_match import PageMatchResult, PageTemplateMatcher
 
 if sys.platform == "win32":
@@ -24,32 +29,31 @@ else:
     WgcHwndStreamer = None
 
 DEFAULT_TITLE_REGEX = r"^\s*(异环|NTE)\s*$"
-# WGC 管线内仍用 JPEG 快照（Windows 捕获）；发给前端的预览固定为 WebP。
+# WGC 管线内 JPEG 快照质量；发给前端的预览另编 JPEG（偏速度）。
 WGC_JPEG_QUALITY = 72
-# 以下为发给浏览器/WebSocket 的预览图参数；模板匹配在裁剪后的 RGB 上做，不经过这些编码。
-WEBP_QUALITY = 78
-WEBP_METHOD = 3  # WebP：method 0~6，数值越小编码越快，预览优先低延迟
+# 预览 JPEG：quality 越低编码越快、体积越小；optimize=False 避免额外扫描。
+PREVIEW_JPEG_QUALITY = 65
 CROP_MARGIN_LR_PX = 2
 CROP_MARGIN_BOTTOM_PX = 2
-PREVIEW_MAX_WIDTH = 800  # 先缩小再编码，减体积与编码耗时
+# 预览编码前是否缩小：>0 为最大宽度（像素）；0 表示不缩小。
+PREVIEW_MAX_WIDTH = 800
 FPS_MIN = 1.0
 FPS_MAX = 60.0
 LIVE_FPS_WINDOW_S = 1.0
 
-
-def _webp_encode_supported() -> bool:
-    """检测当前 Pillow 是否具备 WEBP 编码（依赖 libwebp）。"""
-    try:
-        Image.new("RGB", (4, 4)).save(io.BytesIO(), format="WEBP")
-        return True
-    except Exception:
-        return False
+_placeholder_preview_cache: bytes | None = None
 
 
-if not _webp_encode_supported():
-    raise RuntimeError("Pillow 无法编码 WEBP（需构建时链接 libwebp）。预览仅支持 WebP，请安装带 WebP 的 Pillow。")
-
-_placeholder_webp_cache: bytes | None = None
+def _save_preview_jpeg(img: Image.Image, buf: io.BytesIO, *, quality: int) -> None:
+    """预览 JPEG：关闭 optimize / progressive，4:2:0 色度抽样，优先编码延迟。"""
+    img.save(
+        buf,
+        format="JPEG",
+        quality=quality,
+        optimize=False,
+        subsampling=2,
+        progressive=False,
+    )
 
 
 def _clamp_fps(v: float) -> float:
@@ -59,23 +63,25 @@ def _clamp_fps(v: float) -> float:
 
 def current_preview_mime() -> str:
     """预览二进制帧的 MIME（WS / MJPEG 分片 Content-Type）。"""
-    return "image/webp"
+    return "image/jpeg"
 
 
 def _placeholder_preview() -> bytes:
-    """无窗口或捕获失败时的占位图（WebP）。"""
-    global _placeholder_webp_cache
-    if _placeholder_webp_cache is None:
+    """无窗口或捕获失败时的占位图（JPEG）。"""
+    global _placeholder_preview_cache
+    if _placeholder_preview_cache is None:
         img = Image.new("RGB", (640, 360), (248, 250, 252))
         img = _downscale_preview_max_width(img, PREVIEW_MAX_WIDTH)
         buf = io.BytesIO()
-        img.save(buf, format="WEBP", quality=70, method=WEBP_METHOD)
-        _placeholder_webp_cache = buf.getvalue()
-    return _placeholder_webp_cache
+        _save_preview_jpeg(img, buf, quality=70)
+        _placeholder_preview_cache = buf.getvalue()
+    return _placeholder_preview_cache
 
 
 def _downscale_preview_max_width(img: Image.Image, max_w: int) -> Image.Image:
-    """预览输出：宽度大于 max_w 时按比例缩小（减轻编码与前端解码负担）。"""
+    """预览输出：max_w<=0 不缩放；否则宽度大于 max_w 时按比例缩小。"""
+    if max_w <= 0:
+        return img
     w, h = img.size
     if w <= max_w:
         return img
@@ -101,11 +107,11 @@ def _decode_and_crop_rgb(jpeg: bytes, title_top_px: int) -> Image.Image | None:
 
 
 def _encode_cropped_to_preview(cropped: Image.Image) -> tuple[bytes, int, int]:
-    """将裁剪图按 PREVIEW_MAX_WIDTH 缩小后编码为 WebP；返回 (字节, 逻辑裁剪宽, 逻辑裁剪高)。"""
+    """可选按 PREVIEW_MAX_WIDTH 缩小后编码为 JPEG；返回 (字节, 逻辑裁剪宽, 逻辑裁剪高)。"""
     cw, ch = cropped.size
     scaled = _downscale_preview_max_width(cropped, PREVIEW_MAX_WIDTH)
     buf = io.BytesIO()
-    scaled.save(buf, format="WEBP", quality=WEBP_QUALITY, method=WEBP_METHOD)
+    _save_preview_jpeg(scaled, buf, quality=PREVIEW_JPEG_QUALITY)
     return buf.getvalue(), cw, ch
 
 
@@ -121,6 +127,7 @@ class CaptureStatus:
     preview_mime: str
     page_match: dict[str, object] | None
     page_match_threshold: float
+    pipeline_ms: dict[str, float]
 
 
 def _serialize_page_match(result: PageMatchResult | None) -> dict[str, object] | None:
@@ -154,6 +161,7 @@ class CaptureService:
         self._live_fps_times: deque[float] = deque()
         self._page_match: dict[str, object] | None = None
         self._page_matcher = PageTemplateMatcher()
+        self._pipeline_ms: dict[str, float] = empty_pipeline_timings()
 
         self._wgc = (
             WgcHwndStreamer()
@@ -202,8 +210,10 @@ class CaptureService:
         with self._lock:
             return self._latest
 
-    def get_preview_with_live_fps(self) -> tuple[bytes, float, dict[str, object] | None, int, int]:
-        """返回预览字节、FPS、页面匹配（裁剪后坐标）；以及同上帧一致的裁剪宽高。"""
+    def get_preview_with_live_fps(
+        self,
+    ) -> tuple[bytes, float, dict[str, object] | None, int, int, dict[str, float]]:
+        """返回预览字节、FPS、页面匹配、裁剪宽高、上一帧管线各步耗时（毫秒）。"""
         with self._lock:
             return self._snapshot_unlocked()
 
@@ -213,8 +223,10 @@ class CaptureService:
             self._frame_ready.wait(timeout=timeout_s)
             return self._latest
 
-    def wait_next_preview_with_live_fps(self, timeout_s: float) -> tuple[bytes, float, dict[str, object] | None, int, int]:
-        """同 `wait_next_frame`，额外返回 FPS、页面匹配与同帧裁剪尺寸。"""
+    def wait_next_preview_with_live_fps(
+        self, timeout_s: float
+    ) -> tuple[bytes, float, dict[str, object] | None, int, int, dict[str, float]]:
+        """同 `wait_next_frame`，额外返回 FPS、页面匹配、裁剪尺寸与管线耗时。"""
         with self._frame_ready:
             self._frame_ready.wait(timeout=timeout_s)
             return self._snapshot_unlocked()
@@ -232,6 +244,7 @@ class CaptureService:
                 preview_mime=current_preview_mime(),
                 page_match=self._page_match,
                 page_match_threshold=self._page_matcher.get_match_threshold(),
+                pipeline_ms=dict(self._pipeline_ms),
             )
 
     def _live_fps_unlocked(self) -> float:
@@ -247,14 +260,14 @@ class CaptureService:
 
     def _snapshot_unlocked(
         self,
-    ) -> tuple[bytes, float, dict[str, object] | None, int, int]:
+    ) -> tuple[bytes, float, dict[str, object] | None, int, int, dict[str, float]]:
         cw, ch = self._size
-        return self._latest, self._live_fps_unlocked(), self._page_match, cw, ch
+        return self._latest, self._live_fps_unlocked(), self._page_match, cw, ch, dict(self._pipeline_ms)
 
     def _loop(self) -> None:
         """按 FPS 循环：找窗口 → WGC 快照 → 裁切编码 → 写入 `_latest`。"""
         if sys.platform != "win32" or self._wgc is None:
-            self._set_frame(_placeholder_preview(), None, 0, 0, None)
+            self._set_frame(_placeholder_preview(), None, 0, 0, None, empty_pipeline_timings())
             return
 
         from window_capture import find_game_hwnd, window_title_bar_crop_px
@@ -268,27 +281,41 @@ class CaptureService:
             interval = 1.0 / fps
             min_iv = max(1000.0 / fps / 2.0, 8.0)
 
-            # 按标题正则找游戏窗口；未找到则占位图 + 释放 WGC 目标。
+            partial: dict[str, float] = {}
+
+            t0 = time.perf_counter()
             hwnd = find_game_hwnd(self._title_regex)
+            partial["find_hwnd_ms"] = perf_elapsed_ms(t0)
+
+            # 按标题正则找游戏窗口；未找到则占位图 + 释放 WGC 目标。
             if hwnd is None:
                 self._wgc.ensure_hwnd(None, quality=WGC_JPEG_QUALITY, min_interval_ms=min_iv)
-                self._set_frame(_placeholder_preview(), None, 0, 0, None)
+                self._set_frame(_placeholder_preview(), None, 0, 0, None, merge_pipeline_timings(partial))
             else:
                 self._wgc.ensure_hwnd(hwnd, quality=WGC_JPEG_QUALITY, min_interval_ms=min_iv)
                 data, w, h, _ = self._wgc.get_snapshot()
+
                 if data:
-                    # 去掉标题栏等顶部像素，解码 JPEG 后裁成 RGB，供匹配与预览。
+                    t0 = time.perf_counter()
                     chop = window_title_bar_crop_px(hwnd)
                     cropped = _decode_and_crop_rgb(data, chop)
+                    partial["decode_ms"] = perf_elapsed_ms(t0)
+
                     if cropped is None:
-                        self._set_frame(_placeholder_preview(), hwnd, 0, 0, None)
+                        self._set_frame(_placeholder_preview(), hwnd, 0, 0, None, merge_pipeline_timings(partial))
                     else:
+                        t0 = time.perf_counter()
                         pm = self._page_matcher.match(cropped)
+                        partial["template_match_ms"] = perf_elapsed_ms(t0)
+
+                        t0 = time.perf_counter()
                         out_data, w, h = _encode_cropped_to_preview(cropped)
-                        self._set_frame(out_data, hwnd, w, h, pm)
+                        partial["scale_encode_ms"] = perf_elapsed_ms(t0)
+
+                        self._set_frame(out_data, hwnd, w, h, pm, merge_pipeline_timings(partial))
                 else:
                     # 本帧抓拍失败（空数据）：仍带上 hwnd，前端可知窗口在但画面不可用。
-                    self._set_frame(_placeholder_preview(), hwnd, 0, 0, None)
+                    self._set_frame(_placeholder_preview(), hwnd, 0, 0, None, merge_pipeline_timings(partial))
 
             # 扣除本轮耗时，剩余时间 sleep，避免跑满 CPU。
             delay = interval - (time.monotonic() - t_iter)
@@ -302,13 +329,15 @@ class CaptureService:
         w: int,
         h: int,
         page_match: PageMatchResult | None,
+        pipeline_ms: dict[str, float],
     ) -> None:
-        """原子更新最新帧、HWND、逻辑尺寸、页面匹配；并记录实测 FPS 样本。"""
+        """原子更新最新帧、HWND、逻辑尺寸、页面匹配与管线耗时；并记录实测 FPS 样本。"""
         with self._lock:
             self._latest = raw
             self._hwnd = hwnd
             self._size = (w, h)
             self._page_match = _serialize_page_match(page_match)
+            self._pipeline_ms = dict(pipeline_ms)
             now = time.monotonic()
             self._live_fps_times.append(now)
             while self._live_fps_times and now - self._live_fps_times[0] > LIVE_FPS_WINDOW_S:

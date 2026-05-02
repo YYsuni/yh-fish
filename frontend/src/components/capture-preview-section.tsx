@@ -2,11 +2,18 @@ import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, us
 import {
 	type CaptureStatusResponse,
 	type PageMatchPayload,
+	type PipelineMsPayload,
 	getCaptureWsUrl,
 	getCaptureStatus,
 	postCaptureFps,
 	postCaptureMatchThreshold
 } from '../lib/api-client'
+import {
+	PIPELINE_KEYS,
+	PIPELINE_LABELS,
+	dominantPipelineKey,
+	normalizePipelineMs
+} from '../lib/capture-pipeline-debug'
 
 const FPS_MIN = 1
 const FPS_MAX = 60
@@ -54,11 +61,12 @@ export function CapturePreviewSection() {
 	const [matchBoxCss, setMatchBoxCss] = useState<CSSProperties | null>(null)
 	/** 与 page_match 同帧的裁剪后逻辑尺寸（WS meta 或与轮询 capture 对齐） */
 	const [cropDims, setCropDims] = useState<{ w: number; h: number } | null>(null)
+	const [pipelineMs, setPipelineMs] = useState<PipelineMsPayload | null>(null)
 	const [layoutTick, setLayoutTick] = useState(0)
 	const fpsSyncedOnce = useRef(false)
 	const matchThSyncedOnce = useRef(false)
 	const canvasRef = useRef<HTMLCanvasElement>(null)
-	const previewMimeRef = useRef('image/webp')
+	const previewMimeRef = useRef('image/jpeg')
 
 	const refreshCapture = useCallback(async () => {
 		try {
@@ -76,6 +84,7 @@ export function CapturePreviewSection() {
 				setMatchThDraft(Number.isFinite(th) ? th : 0.5)
 				matchThSyncedOnce.current = true
 			}
+			if (c.pipeline_ms != null) setPipelineMs(normalizePipelineMs(c.pipeline_ms))
 			setError(null)
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e))
@@ -165,8 +174,14 @@ export function CapturePreviewSection() {
 			if (metaLen > 0) {
 				try {
 					const metaJson = new TextDecoder().decode(buf.slice(WS_PREVIEW_HEADER_BYTES, WS_PREVIEW_HEADER_BYTES + metaLen))
-					const parsed = JSON.parse(metaJson) as { page_match?: unknown; crop_width?: unknown; crop_height?: unknown }
+					const parsed = JSON.parse(metaJson) as {
+						page_match?: unknown
+						crop_width?: unknown
+						crop_height?: unknown
+						pipeline_ms?: unknown
+					}
 					pm = parsePageMatch(parsed.page_match ?? null)
+					if (parsed.pipeline_ms != null) setPipelineMs(normalizePipelineMs(parsed.pipeline_ms))
 					const cw = Math.round(Number(parsed.crop_width))
 					const ch = Math.round(Number(parsed.crop_height))
 					if ([cw, ch].every(Number.isFinite) && cw > 0 && ch > 0) wsCrop = { w: cw, h: ch }
@@ -252,6 +267,9 @@ export function CapturePreviewSection() {
 	}, [matchThDraft, refreshCapture])
 
 	const summaryMatch = pageMatch ?? parsePageMatch(capture?.page_match ?? null)
+	const slowKey = pipelineMs ? dominantPipelineKey(pipelineMs) : null
+	const barScaleMs =
+		pipelineMs != null ? Math.max(1, ...PIPELINE_KEYS.map(k => pipelineMs[k] ?? 0)) : 1
 
 	return (
 		<section className='mb-8 w-[400px]'>
@@ -347,6 +365,32 @@ export function CapturePreviewSection() {
 					<p className='text-xs font-medium tracking-wider text-slate-500 uppercase'>窗口尺寸</p>
 					<p className='mt-1 font-mono text-sm text-slate-900'>{capture && capture.width > 0 ? `${capture.width} × ${capture.height}` : '—'}</p>
 				</div>
+			</div>
+
+			<div className='mt-5 rounded-xl bg-amber-50/90 p-3 ring-1 ring-amber-100'>
+				<p className='text-xs font-medium tracking-wider text-amber-900/80 uppercase'>捕获管线耗时（ms）</p>
+				{pipelineMs == null ? (
+					<p className='mt-1 text-xs text-amber-900/70'>等待预览帧…</p>
+				) : (
+					<>
+						<ul className='mt-2 space-y-1.5'>
+							{PIPELINE_KEYS.map(key => {
+								const ms = pipelineMs[key] ?? 0
+								const wPct = Math.min(100, (ms / barScaleMs) * 100)
+								const hot = key === slowKey
+								return (
+									<li key={key} className='grid grid-cols-[7.5rem_3.5rem_1fr] items-center gap-2 text-xs'>
+										<span className={hot ? 'font-semibold text-amber-950' : 'text-amber-900/85'}>{PIPELINE_LABELS[key]}</span>
+										<span className='text-right font-mono text-amber-950 tabular-nums'>{ms.toFixed(1)}</span>
+										<span className='h-1.5 min-w-0 overflow-hidden rounded-full bg-amber-200/80'>
+											<span className='block h-full rounded-full bg-amber-500/90' style={{ width: `${wPct}%` }} />
+										</span>
+									</li>
+								)
+							})}
+						</ul>
+					</>
+				)}
 			</div>
 		</section>
 	)
