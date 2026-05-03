@@ -14,7 +14,7 @@ export function CaptureLeftPanel() {
 
 			<div className='flex items-center gap-2'>
 				<Icon name='icon-diy' size={20} bounce />
-				<span className='text-sm font-medium'>捕获</span>
+				<span className='text-sm font-medium'>配置</span>
 			</div>
 
 			<div className='grid grid-cols-2 gap-3'>

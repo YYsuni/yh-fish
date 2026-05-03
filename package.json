@@ -8,7 +8,8 @@
 		"prettier-plugin-tailwindcss": "^0.8.0"
 	},
 	"scripts": {
-		"dev": "concurrently -n frontend,python -c cyan,magenta \"pnpm --dir frontend dev\" \"node scripts/dev-python.mjs\""
+		"dev:inner": "concurrently -n frontend,python -c cyan,magenta \"pnpm --dir frontend dev\" \"node scripts/dev-python.mjs\"",
+		"dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-as-admin.ps1"
 	},
 	"keywords": [],
 	"author": "",

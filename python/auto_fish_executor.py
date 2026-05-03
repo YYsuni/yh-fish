@@ -20,14 +20,22 @@ import tools.game_input as game_input
 
 _log = logging.getLogger(__name__)
 
-# 钓鱼交互页：按 F 的冷却键（与 SINGLE_ACTION_COOLDOWN_S 一致）
-_FISHING_INTERACT_F_COOLDOWN_KEY = "fishing-interact:f"
+# 各页冷却 key（互不共用；间隔 `SINGLE_ACTION_COOLDOWN_S`）
+_F_REELING_KEY = "reeling:f"
+_F_START_FISHING_KEY = "start-fishing:f"
+_F_WAITING_FOR_BITE_KEY = "waiting-for-bite:f"
+_F_FISHING_END_KEY = "fishing-end:f"
+_F_FISHING_INTERACT_KEY = "fishing-interact:f"
+_F_FISH_HOOKED_KEY = "fish-hooked:f"
+_F_FISH_ESCAPED_KEY = "fish-escaped:f"
+_F_NO_BAIT_KEY = "no-bait:f"
 
-# 单次指令冷却、连续指令冷却（秒）
+_F_FISHING_PREP_CLICK_KEY = "fishing-prep:click"
+_FISHING_PREP_CLICK_OFFSET_XY = (15, 15)
+FISHING_PREP_AFTER_CLICK_SETTLE_S = 1.5
+_FISHING_PREP_USE_PHYSICAL_CLICK = True
+
 SINGLE_ACTION_COOLDOWN_S = 3.0
-REPEAT_ACTION_COOLDOWN_S = 0.5
-
-# 主循环节拍（秒）；不宜低于捕获 FPS 量级以免空转
 TICK_INTERVAL_S = 0.05
 IDLE_WHEN_NO_WINDOW_S = 0.2
 
@@ -56,56 +64,100 @@ class TickContext:
     cooldown: CooldownGate
 
 
+def _click_page_match(
+    ctx: TickContext,
+    cooldown_key: str,
+    label: str,
+    *,
+    from_topleft: tuple[int, int] | None = None,
+    physical: bool = False,
+) -> bool:
+    """按 page_match 的 x,y,w,h 点击。`from_topleft` 为相对匹配左上角的偏移；`None` 为矩形中心。"""
+    pm = ctx.page_match
+    try:
+        x, y, w, h = (int(pm["x"]), int(pm["y"]), int(pm["w"]), int(pm["h"]))
+    except (KeyError, TypeError, ValueError):
+        return False
+    if w <= 0 or h <= 0:
+        return False
+    if not ctx.cooldown.try_fire(cooldown_key, SINGLE_ACTION_COOLDOWN_S, ctx.monotonic):
+        return False
+    if from_topleft is not None:
+        dx, dy = (int(from_topleft[0]), int(from_topleft[1]))
+        cx = max(x, min(x + w - 1, x + dx))
+        cy = max(y, min(y + h - 1, y + dy))
+        exec_msg.msg_out(f"{label}：点击匹配区左上+偏移 ({cx}, {cy})")
+    else:
+        cx = x + w // 2
+        cy = y + h // 2
+        exec_msg.msg_out(f"{label}：点击匹配区中心 ({cx}, {cy})")
+    if physical:
+        return bool(game_input.send_left_click_physical(ctx.hwnd, cx, cy))
+    return bool(game_input.send_left_click(ctx.hwnd, cx, cy))
+
+
+def _tap_f_cooldown(ctx: TickContext, cooldown_key: str, label: str) -> None:
+    """按 F 一次，受 `cooldown_key` 与 `SINGLE_ACTION_COOLDOWN_S` 限制。"""
+    if not ctx.cooldown.try_fire(cooldown_key, SINGLE_ACTION_COOLDOWN_S, ctx.monotonic):
+        return
+    exec_msg.msg_out(f"{label}：F 键按下")
+    game_input.send_key_tap(ctx.hwnd, game_input.VK_F)
+
+
 def _noop_page(ctx: TickContext) -> None:
     """未配置页面：不执行。"""
     _ = ctx
 
 
 def _page_reeling(ctx: TickContext) -> None:
-    """正在溜鱼页面：TODO 按键/节奏。"""
+    """正在溜鱼页面"""
     _ = ctx
 
 
 def _page_start_fishing(ctx: TickContext) -> None:
-    """开始钓鱼页面：TODO。"""
-    _ = ctx
+    """开始钓鱼页面"""
+    _tap_f_cooldown(ctx, _F_START_FISHING_KEY, "开始钓鱼页面")
 
 
 def _page_waiting_for_bite(ctx: TickContext) -> None:
-    """等待咬钩页面：TODO。"""
-    _ = ctx
+    """等待咬钩页面"""
+    _tap_f_cooldown(ctx, _F_WAITING_FOR_BITE_KEY, "等待咬钩页面")
 
 
 def _page_fishing_prep(ctx: TickContext) -> None:
-    """钓鱼准备页面：TODO。"""
-    _ = ctx
+    """钓鱼准备页面"""
+    if _click_page_match(
+        ctx,
+        _F_FISHING_PREP_CLICK_KEY,
+        "钓鱼准备页面",
+        from_topleft=_FISHING_PREP_CLICK_OFFSET_XY,
+        physical=_FISHING_PREP_USE_PHYSICAL_CLICK,
+    ):
+        time.sleep(FISHING_PREP_AFTER_CLICK_SETTLE_S)
 
 
 def _page_fishing_end(ctx: TickContext) -> None:
-    """钓鱼结束页面：TODO。"""
+    """钓鱼结束页面"""
     _ = ctx
 
 
 def _page_fishing_interact(ctx: TickContext) -> None:
-    """钓鱼交互页面：按 F，3 秒冷却。"""
-    if not ctx.cooldown.try_fire(_FISHING_INTERACT_F_COOLDOWN_KEY, SINGLE_ACTION_COOLDOWN_S, ctx.monotonic):
-        return
-    exec_msg.msg_out("钓鱼交互页面：F 键按下")
-    game_input.send_key_tap(ctx.hwnd, game_input.VK_F)
+    """钓鱼交互页面"""
+    _tap_f_cooldown(ctx, _F_FISHING_INTERACT_KEY, "钓鱼交互页面")
 
 
 def _page_fish_hooked(ctx: TickContext) -> None:
-    """上钩页面：TODO。"""
-    _ = ctx
+    """上钩页面"""
+    _tap_f_cooldown(ctx, _F_FISH_HOOKED_KEY, "上钩页面")
 
 
 def _page_fish_escaped(ctx: TickContext) -> None:
-    """鱼儿溜走页面：TODO。"""
+    """鱼儿溜走页面"""
     _ = ctx
 
 
 def _page_no_bait(ctx: TickContext) -> None:
-    """无鱼饵状态：TODO。"""
+    """无鱼饵状态"""
     _ = ctx
 
 
