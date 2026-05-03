@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> None:
     time.sleep(0.35)
 
     url = args.url if args.dev else f"http://{args.host}:{args.port}"
-    webview.create_window("异环钓鱼", url, width=960, height=600, min_size=(480, 520), resizable=True)
+    webview.create_window("异环钓鱼", url, width=960, height=720, min_size=(480, 520), resizable=True)
 
     try:
         webview.start()

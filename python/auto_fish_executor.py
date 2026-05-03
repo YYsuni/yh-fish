@@ -15,15 +15,15 @@ from typing import TYPE_CHECKING, Callable
 if TYPE_CHECKING:
     from capture_service import CaptureService
 
-import exec_msg
-import game_input
+import tools.exec_msg as exec_msg
+import tools.game_input as game_input
 
 _log = logging.getLogger(__name__)
 
 # 钓鱼交互页：按 F 的冷却键（与 SINGLE_ACTION_COOLDOWN_S 一致）
 _FISHING_INTERACT_F_COOLDOWN_KEY = "fishing-interact:f"
 
-# 与开发文档一致：单次指令冷却、连续指令冷却（秒）
+# 单次指令冷却、连续指令冷却（秒）
 SINGLE_ACTION_COOLDOWN_S = 3.0
 REPEAT_ACTION_COOLDOWN_S = 0.5
 
@@ -90,8 +90,7 @@ def _page_fishing_interact(ctx: TickContext) -> None:
     """钓鱼交互页面：按 F，3 秒冷却。"""
     if not ctx.cooldown.try_fire(_FISHING_INTERACT_F_COOLDOWN_KEY, SINGLE_ACTION_COOLDOWN_S, ctx.monotonic):
         return
-    exec_msg.msg_out("钓鱼交互页面")
-    exec_msg.msg_out("钓鱼 F")
+    exec_msg.msg_out("钓鱼交互页面：F 键按下")
     game_input.send_key_tap(ctx.hwnd, game_input.VK_F)
 
 

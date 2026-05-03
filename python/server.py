@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from auto_fish_executor import AutoFishExecutor
 from capture_service import CaptureService
-from exec_msg import snapshot as msg_snapshot
+from tools.exec_msg import snapshot as msg_snapshot
 
 WS_PREVIEW_HEADER = struct.Struct('>fI')  # 实测 FPS + UTF-8 JSON meta（page_match、crop 尺寸）字节长度
 

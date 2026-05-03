@@ -9,6 +9,8 @@ VK_F = 0x46
 
 if sys.platform == "win32":
     import ctypes
+    import random
+    import time
     from ctypes import wintypes
 
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -31,6 +33,7 @@ if sys.platform == "win32":
 
     def send_key_tap(hwnd: int, vk: int) -> None:
         _post_key(hwnd, vk, key_up=False)
+        time.sleep(random.uniform(0.04, 0.14))
         _post_key(hwnd, vk, key_up=True)
 
     def send_key_down(hwnd: int, vk: int) -> None:

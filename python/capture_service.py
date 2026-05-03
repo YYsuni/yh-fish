@@ -12,15 +12,15 @@ from dataclasses import dataclass
 
 from PIL import Image
 
-from capture_pipeline_debug import (
+from tools.capture_pipeline_debug import (
     empty_pipeline_timings,
     merge_pipeline_timings,
     perf_elapsed_ms,
 )
-from page_template_match import PageMatchResult, PageTemplateMatcher
+from tools.page_template_match import PageMatchResult, PageTemplateMatcher
 
 if sys.platform == "win32":
-    from native_stream import WgcHwndStreamer, native_backend_available
+    from tools.native_stream import WgcHwndStreamer, native_backend_available
 else:
     def native_backend_available() -> bool:
         """非 Windows 无 WGC，后端不可用。"""
@@ -270,7 +270,7 @@ class CaptureService:
             self._set_frame(_placeholder_preview(), None, 0, 0, None, empty_pipeline_timings())
             return
 
-        from window_capture import find_game_hwnd, window_title_bar_crop_px
+        from tools.window_capture import find_game_hwnd, window_title_bar_crop_px
 
         while not self._stop.is_set():
             # 本轮开始时间，用于后面 sleep 补时，尽量贴近目标 FPS。
