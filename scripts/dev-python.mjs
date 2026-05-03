@@ -17,7 +17,7 @@ if (!existsSync(py)) {
 }
 
 const main = join(root, "python", "main.py");
-const child = spawn(py, [main, "--dev"], { stdio: "inherit", cwd: root, shell: false });
+const child = spawn(py, ["-u", main, "--dev"], { stdio: "inherit", cwd: root, shell: false });
 child.on("exit", (code, signal) => {
 	if (signal) process.kill(process.pid, signal);
 	process.exit(code ?? 1);
