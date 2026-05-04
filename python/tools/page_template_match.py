@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -143,6 +144,53 @@ def match_template_in_precrop_roi(
     if conf < float(threshold):
         return None
     return r
+
+
+# 与 `auto_fish_executor._page_reeling` 同一 ROI 与阈值；整窗未裁坐标系 [x, y, w, h]
+REELING_BAR_MATCH_THRESHOLD = 0.8
+REELING_BAR_REGION_PRECROP = (402.72, 94.16, 484.61, 16.58)
+_REELING_BAR_TEMPLATE_ROWS: tuple[tuple[str, str, str], ...] = (
+    ("left", "溜鱼条-左边缘.png", "左边缘"),
+    ("right", "溜鱼条-右边缘.png", "右边缘"),
+    ("scale", "溜鱼条-刻度.png", "刻度"),
+)
+
+
+def run_reeling_bar_templates(
+    cropped_rgb: Image.Image,
+) -> tuple[dict[str, object], tuple[tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None]]:
+    """正在溜鱼页：在溜鱼条 ROI 内匹配左/右边缘与刻度。返回 ``(API 可序列化 debug, (左,右,刻度) 三元组)``。"""
+    base = Path(__file__).resolve().parents[1] / "images" / "auto_fish"
+    t0 = time.perf_counter()
+    trips: list[tuple[int, int, int, int, float] | None] = []
+    items: list[dict[str, object]] = []
+    for key, fn, zh_label in _REELING_BAR_TEMPLATE_ROWS:
+        path = base / fn
+        r = match_template_in_precrop_roi(
+            cropped_rgb,
+            path,
+            REELING_BAR_REGION_PRECROP,
+            threshold=float(REELING_BAR_MATCH_THRESHOLD),
+        )
+        trips.append(r)
+        if r is None:
+            items.append({"key": key, "label": zh_label, "similarity": None})
+        else:
+            x, y, w, h, conf = r
+            items.append(
+                {
+                    "key": key,
+                    "label": zh_label,
+                    "x": int(x),
+                    "y": int(y),
+                    "w": int(w),
+                    "h": int(h),
+                    "similarity": float(conf),
+                }
+            )
+    ms = (time.perf_counter() - t0) * 1000.0
+    debug: dict[str, object] = {"match_ms": round(ms, 3), "items": items}
+    return (debug, (trips[0], trips[1], trips[2]))
 
 
 def _eval_page_features(

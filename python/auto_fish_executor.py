@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-"""自动钓鱼执行器：启动后轮询当前页面，按 page_id 调用各页处理函数。
-"""
+"""自动钓鱼执行器：启动后轮询当前页面，按 page_id 调用各页处理函数。"""
 
 from __future__ import annotations
 
@@ -8,14 +7,12 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable
 
 from capture_service import CaptureService
 
 import tools.exec_msg as exec_msg
 import tools.game_input as game_input
-from tools.page_template_match import match_template_in_precrop_roi
 
 _log = logging.getLogger(__name__)
 
@@ -91,16 +88,10 @@ def _page_reeling(ctx: TickContext) -> None:
     """正在溜鱼页面：在溜鱼条 ROI 内匹配左/右边缘与刻度，按刻度相对安全区发 A/D。"""
     if not ctx.cooldown.try_fire("reeling:bar", 0.2, ctx.monotonic):
         return
-    cropped = ctx.capture.get_last_cropped_rgb_copy()
-    if cropped is None:
+    triples = ctx.capture.get_last_reeling_bar_triples()
+    if triples is None:
         return
-    img_dir = Path(__file__).resolve().parent / "images" / "auto_fish"
-    # 与 pages.json 相同，整窗未裁坐标系 [x, y, w, h]
-    reg = (383.74, 94.16, 509.86, 16.58)
-    th = 0.8
-    left = match_template_in_precrop_roi(cropped, img_dir / "溜鱼条-左边缘.png", reg, threshold=th)
-    right = match_template_in_precrop_roi(cropped, img_dir / "溜鱼条-右边缘.png", reg, threshold=th)
-    scale = match_template_in_precrop_roi(cropped, img_dir / "溜鱼条-刻度.png", reg, threshold=th)
+    left, right, scale = triples
     if left is None or right is None or scale is None:
         return
     lx, _ly, lw, _lh, _lc = left

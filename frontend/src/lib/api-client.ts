@@ -21,6 +21,8 @@ export type CaptureStatusResponse = {
 	page_match: PageMatchPayload
 	page_match_threshold: number
 	pipeline_ms?: PipelineMsPayload
+	/** 正在溜鱼页时由后端填充：子模板匹配耗时与各项相似度/矩形 */
+	reeling_bar_debug?: unknown
 }
 
 export function getCaptureWsUrl(): string {

@@ -23,12 +23,21 @@ import {
 	postCaptureMatchThreshold
 } from '../lib/api-client'
 import { normalizePipelineMs } from '../lib/capture-pipeline-debug'
+import { cropRectToCanvasOverlayCss } from '../lib/preview-canvas-overlay'
+import { parseReelingBarDebug, type ReelingBarDebug } from '../lib/reeling-bar-debug'
 
 const FPS_MIN = 1
 const FPS_MAX = 60
 const MATCH_TH_MIN = 0
 const MATCH_TH_MAX = 1
 const WS_PREVIEW_HEADER_BYTES = 8
+
+const REELING_OVERLAY_RING: Record<string, string> = {
+	left: 'ring-[#4a9c7c]',
+	right: 'ring-[#5b8fc7]',
+	scale: 'ring-[#c9a227]'
+}
+const REELING_OVERLAY_KEYS = ['left', 'right', 'scale'] as const
 
 export function parsePageMatch(raw: unknown): PageMatchPayload {
 	if (raw == null || typeof raw !== 'object') return null
@@ -63,13 +72,20 @@ type PreviewOverlay = {
 	pageMatch: PageMatchPayload
 	cropDims: { w: number; h: number } | null
 	pipelineMs: PipelineMsPayload | null
+	reelingBarDebug: ReelingBarDebug | null
 }
 
 const initialPreviewOverlay: PreviewOverlay = {
 	liveFps: null,
 	pageMatch: null,
 	cropDims: null,
-	pipelineMs: null
+	pipelineMs: null,
+	reelingBarDebug: null
+}
+
+export type ReelingBarOverlayBox = {
+	key: string
+	style: CSSProperties
 }
 
 export type CaptureSessionContextValue = {
@@ -82,6 +98,7 @@ export type CaptureSessionContextValue = {
 	setMatchTh: Dispatch<SetStateAction<DraftSaving>>
 	canvasRef: RefObject<HTMLCanvasElement | null>
 	matchBoxCss: CSSProperties | null
+	reelingBarOverlayBoxes: ReelingBarOverlayBox[] | null
 	applyCaptureSettings: () => Promise<void>
 }
 
@@ -101,9 +118,10 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 	const [matchTh, setMatchTh] = useState<DraftSaving>({ draft: 0.5, saving: false })
 	const [preview, setPreview] = useState<PreviewOverlay>(initialPreviewOverlay)
 	const [matchBoxCss, setMatchBoxCss] = useState<CSSProperties | null>(null)
+	const [reelingBarOverlayBoxes, setReelingBarOverlayBoxes] = useState<ReelingBarOverlayBox[] | null>(null)
 	const [layoutTick, setLayoutTick] = useState(0)
 
-	const { liveFps, pageMatch, cropDims, pipelineMs } = preview
+	const { liveFps, pageMatch, cropDims, pipelineMs, reelingBarDebug } = preview
 	const fpsSyncedOnce = useRef(false)
 	const matchThSyncedOnce = useRef(false)
 	const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -117,7 +135,8 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 				...p,
 				pageMatch: parsePageMatch(c.page_match ?? null),
 				cropDims: c.width > 0 && c.height > 0 ? { w: c.width, h: c.height } : p.cropDims,
-				pipelineMs: c.pipeline_ms != null ? normalizePipelineMs(c.pipeline_ms) : p.pipelineMs
+				pipelineMs: c.pipeline_ms != null ? normalizePipelineMs(c.pipeline_ms) : p.pipelineMs,
+				reelingBarDebug: parseReelingBarDebug(c.reeling_bar_debug ?? null)
 			}))
 			previewMimeRef.current = c.preview_mime
 			if (!fpsSyncedOnce.current) {
@@ -161,30 +180,34 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 			setMatchBoxCss(null)
 			return
 		}
-		const clientW = el.clientWidth
-		const clientH = el.clientHeight
-		const bmpW = el.width
-		const bmpH = el.height
-		if (bmpW <= 0 || bmpH <= 0 || clientW <= 0 || clientH <= 0) {
-			setMatchBoxCss(null)
+		const style = cropRectToCanvasOverlayCss(el, cropW, cropH, pageMatch.x, pageMatch.y, pageMatch.w, pageMatch.h)
+		setMatchBoxCss(style ?? null)
+	}, [pageMatch, layoutTick, cropDims, capture?.width, capture?.height])
+
+	useLayoutEffect(() => {
+		const el = canvasRef.current
+		if (!el || pageMatch?.page_id !== 'reeling' || reelingBarDebug == null) {
+			setReelingBarOverlayBoxes(null)
 			return
 		}
-		const bx = (pageMatch.x * bmpW) / cropW
-		const by = (pageMatch.y * bmpH) / cropH
-		const bwR = (pageMatch.w * bmpW) / cropW
-		const bhR = (pageMatch.h * bmpH) / cropH
-		const uiScale = Math.min(clientW / bmpW, clientH / bmpH)
-		const dw = bmpW * uiScale
-		const dh = bmpH * uiScale
-		const ox = (clientW - dw) / 2
-		const oy = (clientH - dh) / 2
-		setMatchBoxCss({
-			left: ox + bx * uiScale,
-			top: oy + by * uiScale,
-			width: bwR * uiScale,
-			height: bhR * uiScale
-		})
-	}, [pageMatch, layoutTick, cropDims, capture?.width, capture?.height])
+		const cropW = cropDims?.w ?? capture?.width ?? 0
+		const cropH = cropDims?.h ?? capture?.height ?? 0
+		if (cropW <= 0 || cropH <= 0) {
+			setReelingBarOverlayBoxes(null)
+			return
+		}
+		const boxes: ReelingBarOverlayBox[] = []
+		for (const key of REELING_OVERLAY_KEYS) {
+			const item = reelingBarDebug.items.find(i => i.key === key)
+			if (item == null) continue
+			const { x, y, w, h, similarity: sim } = item
+			if (sim == null || !Number.isFinite(sim) || x == null || y == null || w == null || h == null || w <= 0 || h <= 0) continue
+			const style = cropRectToCanvasOverlayCss(el, cropW, cropH, x, y, w, h)
+			if (style == null) continue
+			boxes.push({ key, style })
+		}
+		setReelingBarOverlayBoxes(boxes.length > 0 ? boxes : null)
+	}, [pageMatch?.page_id, reelingBarDebug, layoutTick, cropDims, capture?.width, capture?.height])
 
 	useEffect(() => {
 		const canvas = canvasRef.current
@@ -215,6 +238,7 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 			let pm: PageMatchPayload = null
 			let wsCrop: { w: number; h: number } | null = null
 			let metaPipelineMs: PipelineMsPayload | undefined
+			let wsReeling: ReelingBarDebug | null | undefined
 			if (metaLen > 0) {
 				try {
 					const metaJson = new TextDecoder().decode(buf.slice(WS_PREVIEW_HEADER_BYTES, WS_PREVIEW_HEADER_BYTES + metaLen))
@@ -223,12 +247,16 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 						crop_width?: unknown
 						crop_height?: unknown
 						pipeline_ms?: unknown
+						reeling_bar_debug?: unknown
 					}
 					pm = parsePageMatch(parsed.page_match ?? null)
 					if (parsed.pipeline_ms != null) metaPipelineMs = normalizePipelineMs(parsed.pipeline_ms)
 					const cw = Math.round(Number(parsed.crop_width))
 					const ch = Math.round(Number(parsed.crop_height))
 					if ([cw, ch].every(Number.isFinite) && cw > 0 && ch > 0) wsCrop = { w: cw, h: ch }
+					if (parsed.reeling_bar_debug !== undefined) {
+						wsReeling = parseReelingBarDebug(parsed.reeling_bar_debug)
+					}
 				} catch {
 					/* ignore */
 				}
@@ -257,7 +285,8 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 						liveFps,
 						pageMatch: pm,
 						cropDims: wsCrop ?? prev.cropDims,
-						...(metaPipelineMs !== undefined ? { pipelineMs: metaPipelineMs } : {})
+						...(metaPipelineMs !== undefined ? { pipelineMs: metaPipelineMs } : {}),
+						...(wsReeling !== undefined ? { reelingBarDebug: wsReeling } : {})
 					}))
 				}
 			} catch (e) {
@@ -320,27 +349,17 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 		() => ({
 			capture,
 			error,
-			preview: { liveFps, pageMatch, cropDims, pipelineMs },
+			preview: { liveFps, pageMatch, cropDims, pipelineMs, reelingBarDebug },
 			fps,
 			setFps,
 			matchTh,
 			setMatchTh,
 			canvasRef,
 			matchBoxCss,
+			reelingBarOverlayBoxes,
 			applyCaptureSettings
 		}),
-		[
-			capture,
-			error,
-			liveFps,
-			pageMatch,
-			cropDims,
-			pipelineMs,
-			fps,
-			matchTh,
-			matchBoxCss,
-			applyCaptureSettings
-		]
+		[capture, error, liveFps, pageMatch, cropDims, pipelineMs, reelingBarDebug, fps, matchTh, matchBoxCss, reelingBarOverlayBoxes, applyCaptureSettings]
 	)
 
 	return <CaptureSessionContext.Provider value={value}>{children}</CaptureSessionContext.Provider>

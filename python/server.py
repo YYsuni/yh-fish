@@ -79,6 +79,7 @@ def create_app(
             "page_match": s.page_match,
             "page_match_threshold": s.page_match_threshold,
             "pipeline_ms": s.pipeline_ms,
+            "reeling_bar_debug": s.reeling_bar_debug,
         }
 
     @app.post("/api/capture/fps")
@@ -122,6 +123,7 @@ def create_app(
             crop_w: int,
             crop_h: int,
             pipeline_ms: dict[str, float],
+            reeling_bar_debug: dict[str, object] | None,
         ) -> bytes:
             meta = json.dumps(
                 {
@@ -129,6 +131,7 @@ def create_app(
                     "crop_width": crop_w,
                     "crop_height": crop_h,
                     "pipeline_ms": pipeline_ms,
+                    "reeling_bar_debug": reeling_bar_debug,
                 },
                 ensure_ascii=False,
                 separators=(",", ":"),
@@ -139,16 +142,16 @@ def create_app(
         await ws.send_json({"mime": capture.preview_mime()})
         loop = asyncio.get_running_loop()
         try:
-            pix, fps, pm, cw, ch, pipe = await loop.run_in_executor(None, capture.get_preview_with_live_fps)
-            await ws.send_bytes(pack_preview(pix, fps, pm, cw, ch, pipe))
+            pix, fps, pm, cw, ch, pipe, rbd = await loop.run_in_executor(None, capture.get_preview_with_live_fps)
+            await ws.send_bytes(pack_preview(pix, fps, pm, cw, ch, pipe, rbd))
             while True:
                 timeout = capture.mjpeg_sleep_s()
-                pix, fps, pm, cw, ch, pipe = await loop.run_in_executor(
+                pix, fps, pm, cw, ch, pipe, rbd = await loop.run_in_executor(
                     None,
                     capture.wait_next_preview_with_live_fps,
                     timeout,
                 )
-                await ws.send_bytes(pack_preview(pix, fps, pm, cw, ch, pipe))
+                await ws.send_bytes(pack_preview(pix, fps, pm, cw, ch, pipe, rbd))
         except WebSocketDisconnect:
             pass
 

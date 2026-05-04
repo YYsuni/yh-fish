@@ -1,12 +1,13 @@
 import { Card, Divider, Icon } from 'animal-island-ui'
-import { CapturePipelineDebugPanel } from './capture-pipeline-debug-panel'
 import { formatLiveFpsLabel, parsePageMatch, useCaptureSession } from './capture-session-context'
 import { MsgTerminalPanel } from './msg-terminal-panel'
 
 export function CaptureRightPanel() {
-	const { capture, error, preview, canvasRef, matchBoxCss } = useCaptureSession()
-	const { liveFps, pageMatch, pipelineMs } = preview
+	const { capture, error, preview, canvasRef, matchBoxCss, reelingBarOverlayBoxes } = useCaptureSession()
+	const { liveFps, pageMatch, reelingBarDebug } = preview
 	const summaryMatch = pageMatch ?? parsePageMatch(capture?.page_match ?? null)
+	const pageId = summaryMatch?.page_id ?? ''
+	const showReelingMeta = pageId === 'reeling' && reelingBarDebug != null
 
 	return (
 		<div className='flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto'>
@@ -28,6 +29,9 @@ export function CaptureRightPanel() {
 					{summaryMatch?.page_label}
 				</div>
 				{matchBoxCss && <div className='pointer-events-none absolute z-9 rounded-sm ring-2 ring-[#fc736d]' style={matchBoxCss} aria-hidden />}
+				{reelingBarOverlayBoxes?.map(b => (
+					<div key={b.key} className={`pointer-events-none absolute z-11 rounded-sm ring-2 ring-[#fc736d]`} style={b.style} aria-hidden />
+				))}
 			</div>
 
 			{error != null && error !== '' && (
@@ -50,7 +54,18 @@ export function CaptureRightPanel() {
 				</Card>
 			</div>
 
-			{/* <CapturePipelineDebugPanel pipelineMs={pipelineMs} /> */}
+			{showReelingMeta && reelingBarDebug != null && (
+				<Card color='app-teal' className='max-w-md p-3'>
+					<p className='text-xs font-medium tracking-wider uppercase opacity-90'>溜鱼子模板匹配</p>
+					<p className='mt-1 font-mono text-xs opacity-90'>匹配时间：{reelingBarDebug.match_ms.toFixed(2)} ms</p>
+					<p className='mt-1 font-mono text-xs opacity-90'>
+						匹配率：
+						{reelingBarDebug.items
+							.map(it => `${it.label} ${it.similarity != null && Number.isFinite(it.similarity) ? it.similarity.toFixed(4) : '—'}`)
+							.join(' · ')}
+					</p>
+				</Card>
+			)}
 
 			<Divider type='line-brown' />
 

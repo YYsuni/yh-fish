@@ -39,7 +39,7 @@ export function MsgTerminalPanel() {
 		<section className='flex min-h-0 flex-1 flex-col'>
 			<pre
 				ref={preRef}
-				className='max-h-48 min-h-28 flex-1 overflow-auto rounded-md bg-[#2c2824] px-2 py-1.5 font-mono text-[11px] leading-relaxed text-[#e8e4d4]'>
+				className='max-h-36 min-h-28 flex-1 overflow-auto rounded-md bg-[#2c2824] px-2 py-1.5 font-mono text-[11px] leading-relaxed text-[#e8e4d4]'>
 				{lines.length === 0 ? (
 					<span className='text-[#9a9088]'>暂无输出</span>
 				) : (

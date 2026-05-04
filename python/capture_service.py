@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import sys
 import threading
 import time
@@ -17,7 +18,9 @@ from tools.capture_pipeline_debug import (
     merge_pipeline_timings,
     perf_elapsed_ms,
 )
-from tools.page_template_match import PageMatchResult, PageTemplateMatcher
+from tools.page_template_match import PageMatchResult, PageTemplateMatcher, run_reeling_bar_templates
+
+_log = logging.getLogger(__name__)
 
 if sys.platform == "win32":
     from tools.native_stream import WgcHwndStreamer, native_backend_available
@@ -129,6 +132,7 @@ class CaptureStatus:
     page_match: dict[str, object] | None
     page_match_threshold: float
     pipeline_ms: dict[str, float]
+    reeling_bar_debug: dict[str, object] | None
 
 
 def _serialize_page_match(result: PageMatchResult | None) -> dict[str, object] | None:
@@ -164,6 +168,11 @@ class CaptureService:
         self._page_matcher = PageTemplateMatcher()
         self._pipeline_ms: dict[str, float] = empty_pipeline_timings()
         self._last_cropped_rgb: Image.Image | None = None
+        self._reeling_bar_debug: dict[str, object] | None = None
+        self._reeling_bar_triples: (
+            tuple[tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None]
+            | None
+        ) = None
 
         self._wgc = WgcHwndStreamer() if (native_backend_available() and WgcHwndStreamer is not None) else None
 
@@ -210,8 +219,8 @@ class CaptureService:
 
     def get_preview_with_live_fps(
         self,
-    ) -> tuple[bytes, float, dict[str, object] | None, int, int, dict[str, float]]:
-        """返回预览字节、FPS、页面匹配、裁剪宽高、上一帧管线各步耗时（毫秒）。"""
+    ) -> tuple[bytes, float, dict[str, object] | None, int, int, dict[str, float], dict[str, object] | None]:
+        """返回预览字节、FPS、页面匹配、裁剪宽高、上一帧管线各步耗时（毫秒）、溜鱼子模板调试。"""
         with self._lock:
             return self._snapshot_unlocked()
 
@@ -221,11 +230,20 @@ class CaptureService:
             self._frame_ready.wait(timeout=timeout_s)
             return self._latest
 
-    def wait_next_preview_with_live_fps(self, timeout_s: float) -> tuple[bytes, float, dict[str, object] | None, int, int, dict[str, float]]:
-        """同 `wait_next_frame`，额外返回 FPS、页面匹配、裁剪尺寸与管线耗时。"""
+    def wait_next_preview_with_live_fps(
+        self, timeout_s: float
+    ) -> tuple[bytes, float, dict[str, object] | None, int, int, dict[str, float], dict[str, object] | None]:
+        """同 `wait_next_frame`，额外返回 FPS、页面匹配、裁剪尺寸与管线耗时、溜鱼子模板调试。"""
         with self._frame_ready:
             self._frame_ready.wait(timeout=timeout_s)
             return self._snapshot_unlocked()
+
+    def get_last_reeling_bar_triples(
+        self,
+    ) -> tuple[tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None] | None:
+        """上一帧在「正在溜鱼」页时由管线算出的左/右/刻度模板匹配结果；否则 None。"""
+        with self._lock:
+            return self._reeling_bar_triples
 
     def get_last_cropped_rgb_copy(self) -> Image.Image | None:
         """返回上一帧逻辑裁剪区 RGB 图副本；无有效帧时为 None。与预览 JPEG 同坐标系（客户区去边距后）。"""
@@ -247,6 +265,7 @@ class CaptureService:
                 page_match=self._page_match,
                 page_match_threshold=self._page_matcher.get_match_threshold(),
                 pipeline_ms=dict(self._pipeline_ms),
+                reeling_bar_debug=self._reeling_bar_debug,
             )
 
     def _live_fps_unlocked(self) -> float:
@@ -262,9 +281,17 @@ class CaptureService:
 
     def _snapshot_unlocked(
         self,
-    ) -> tuple[bytes, float, dict[str, object] | None, int, int, dict[str, float]]:
+    ) -> tuple[bytes, float, dict[str, object] | None, int, int, dict[str, float], dict[str, object] | None]:
         cw, ch = self._size
-        return self._latest, self._live_fps_unlocked(), self._page_match, cw, ch, dict(self._pipeline_ms)
+        return (
+            self._latest,
+            self._live_fps_unlocked(),
+            self._page_match,
+            cw,
+            ch,
+            dict(self._pipeline_ms),
+            self._reeling_bar_debug,
+        )
 
     def _loop(self) -> None:
         """按 FPS 循环：找窗口 → WGC 快照 → 裁切编码 → 写入 `_latest`。"""
@@ -336,12 +363,25 @@ class CaptureService:
         cropped_rgb: Image.Image | None,
     ) -> None:
         """原子更新最新帧、HWND、逻辑尺寸、页面匹配与管线耗时；并记录实测 FPS 样本。"""
+        reeling_debug: dict[str, object] | None = None
+        reeling_triples: (
+            tuple[tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None]
+            | None
+        ) = None
+        if page_match is not None and page_match.page_id == "reeling" and cropped_rgb is not None:
+            try:
+                reeling_debug, reeling_triples = run_reeling_bar_templates(cropped_rgb)
+            except Exception:
+                _log.exception("reeling bar template match failed")
+
         with self._lock:
             self._latest = raw
             self._hwnd = hwnd
             self._size = (w, h)
             self._last_cropped_rgb = cropped_rgb
             self._page_match = _serialize_page_match(page_match)
+            self._reeling_bar_debug = reeling_debug
+            self._reeling_bar_triples = reeling_triples
             self._pipeline_ms = dict(pipeline_ms)
             now = time.monotonic()
             self._live_fps_times.append(now)
