@@ -6,8 +6,7 @@ import { postAutoFishStart, postAutoFishStop } from '../lib/api-client'
 const LOGIC_LABEL: Record<string, string> = {
 	fishing: '钓鱼',
 	'sell-fish': '卖鱼',
-	'buy-bait': '买鱼饵',
-	'change-bait': '换鱼饵'
+	bait: '鱼饵'
 }
 
 export type AutoFishRemote = ReturnType<typeof useAutoFishStatus>

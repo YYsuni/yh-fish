@@ -6,6 +6,7 @@ from __future__ import annotations
 import sys
 import time
 
+VK_E = 0x45
 VK_F = 0x46
 VK_A = 0x41
 VK_D = 0x44

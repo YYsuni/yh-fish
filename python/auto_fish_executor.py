@@ -25,14 +25,12 @@ _log = logging.getLogger(__name__)
 # 自动逻辑状态（与前端 `AutoFishLogicState` 对齐）
 LOGIC_FISHING = "fishing"
 LOGIC_SELL_FISH = "sell-fish"
-LOGIC_BUY_BAIT = "buy-bait"
-LOGIC_CHANGE_BAIT = "change-bait"
-VALID_LOGIC_STATES: frozenset[str] = frozenset({LOGIC_FISHING, LOGIC_SELL_FISH, LOGIC_BUY_BAIT, LOGIC_CHANGE_BAIT})
+LOGIC_BAIT = "bait"
+VALID_LOGIC_STATES: frozenset[str] = frozenset({LOGIC_FISHING, LOGIC_SELL_FISH, LOGIC_BAIT})
 _LOGIC_LABELS: dict[str, str] = {
     LOGIC_FISHING: "钓鱼",
     LOGIC_SELL_FISH: "卖鱼",
-    LOGIC_BUY_BAIT: "买鱼饵",
-    LOGIC_CHANGE_BAIT: "换鱼饵",
+    LOGIC_BAIT: "鱼饵",
 }
 
 
@@ -40,9 +38,11 @@ class CooldownGate:
     """按任意字符串 key 记录上次触发时间，`try_fire` 超过间隔才返回 True 并刷新时间。"""
 
     def __init__(self) -> None:
+        """初始化：空的上次触发时间表。"""
         self._last: dict[str, float] = {}
 
     def try_fire(self, key: str, min_interval_s: float, now: float) -> bool:
+        """若距该 key 上次触发已超过 min_interval_s，则刷新时间并返回 True；否则返回 False。"""
         last = self._last.get(key, 0.0)
         if now - last >= min_interval_s:
             self._last[key] = now
@@ -106,7 +106,7 @@ def _noop_page(ctx: TickContext) -> None:
 
 
 def _page_reeling(ctx: TickContext) -> None:
-    """正在溜鱼页面：在溜鱼条 ROI 内匹配左/右边缘与刻度；安全区为左右内缘之间宽度的中间一半，刻度在其外才发 A/D。"""
+    """正在溜鱼页面：在溜鱼条 ROI 内匹配左/右边缘与刻度；以左右内缘几何中线为目标，偏左 D、偏右 A；按键按住时长按与中线的偏差比例调节，上限 0.4s。"""
     if not ctx.cooldown.try_fire("reeling:bar", 0.2, ctx.monotonic):
         return
     triples = ctx.capture.get_last_reeling_bar_triples()
@@ -122,22 +122,24 @@ def _page_reeling(ctx: TickContext) -> None:
     right_inner = rx
     if left_inner >= right_inner:
         return
-    span = float(right_inner - left_inner)
-    safe_lo = left_inner + span * 0.25
-    safe_hi = right_inner - span * 0.25
-    if safe_lo >= safe_hi:
+    mid_x = (left_inner + right_inner) / 2.0
+    half_span = (right_inner - left_inner) / 2.0
+    if half_span <= 0:
         return
     scale_cx = sx + sw // 2
-    hold = 0.2
-    if scale_cx < safe_lo:
-        exec_msg.msg_out("溜鱼：刻度偏左，D")
+    dev = abs(scale_cx - mid_x)
+    hold_max = 0.4
+    hold = min(hold_max, hold_max * (dev / 80))
+    if scale_cx < mid_x:
+        exec_msg.msg_out("溜鱼：D")
         game_input.send_key_tap(ctx.hwnd, game_input.VK_D, hold_between_down_up_s=hold)
-    elif scale_cx > safe_hi:
-        exec_msg.msg_out("溜鱼：刻度偏右，A")
+    elif scale_cx > mid_x:
+        exec_msg.msg_out("溜鱼：A")
         game_input.send_key_tap(ctx.hwnd, game_input.VK_A, hold_between_down_up_s=hold)
 
 
 def _page_start_fishing(ctx: TickContext) -> None:
+    """开始钓鱼页面：卖鱼逻辑下点击固定坐标；鱼饵逻辑按 E；否则按 F。"""
     if ctx.logic_state == LOGIC_SELL_FISH:
         if not ctx.cooldown.try_fire("start-fishing:sell-click", 3.0, ctx.monotonic):
             return
@@ -145,31 +147,37 @@ def _page_start_fishing(ctx: TickContext) -> None:
         exec_msg.msg_out(f"开始钓鱼页面（卖鱼）：左键 整窗→客户区 ({cx}, {cy})")
         game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
         return
+    if ctx.logic_state == LOGIC_BAIT:
+        if not ctx.cooldown.try_fire("start-fishing:buy-bait-e", 3.0, ctx.monotonic):
+            return
+        exec_msg.msg_out("开始钓鱼页面（鱼饵）：E 键按下")
+        game_input.send_key_tap(ctx.hwnd, game_input.VK_E)
+        return
     _tap_f_cooldown(ctx, "start-fishing", "开始钓鱼页面")
 
 
 def _page_waiting_for_bite(ctx: TickContext) -> None:
+    """等待咬钩页面：按 F（带冷却）。"""
     _tap_f_cooldown(ctx, "waiting-for-bite", "等待咬钩页面")
 
 
 def _page_fishing_prep(ctx: TickContext) -> None:
+    """钓鱼准备页面：钓鱼逻辑点击模板匹配区；鱼饵逻辑点击选饵。"""
     if ctx.logic_state == LOGIC_FISHING:
         if _click_page_match(ctx, "fishing-prep", "钓鱼准备页面", physical=True):
             time.sleep(1.5)
         return
-    if ctx.logic_state == LOGIC_BUY_BAIT:
+    if ctx.logic_state == LOGIC_BAIT:
         if not ctx.cooldown.try_fire("fishing-prep:buy-bait-click", 3.0, ctx.monotonic):
             return
         cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 1136, 556)
         exec_msg.msg_out(f"钓鱼准备页面：选择鱼饵")
         game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
         return
-    if ctx.apply_logic_state is not None:
-        ctx.apply_logic_state(LOGIC_BUY_BAIT)
-    exec_msg.msg_out("钓鱼准备页面：已进入买鱼饵逻辑")
 
 
 def _page_fishing_end(ctx: TickContext) -> None:
+    """钓鱼结束页面：按 ESC 关闭（带冷却）。"""
     if not ctx.cooldown.try_fire("fishing-end", 3.0, ctx.monotonic):
         return
     exec_msg.msg_out("钓鱼结束页面：ESC 键按下")
@@ -177,14 +185,17 @@ def _page_fishing_end(ctx: TickContext) -> None:
 
 
 def _page_fishing_interact(ctx: TickContext) -> None:
+    """钓鱼交互页面：按 F（带冷却）。"""
     _tap_f_cooldown(ctx, "fishing-interact", "钓鱼交互页面")
 
 
 def _page_fish_hooked(ctx: TickContext) -> None:
+    """上钩页面：按 F（带冷却）。"""
     _tap_f_cooldown(ctx, "fish-hooked", "上钩页面")
 
 
 def _page_fish_escaped(ctx: TickContext) -> None:
+    """跑鱼页面：无需自动操作。"""
     _ = ctx
 
 
@@ -198,35 +209,53 @@ def _page_no_bait(ctx: TickContext) -> None:
 
 
 def _page_change_bait(ctx: TickContext) -> None:
-    """更换鱼饵页"""
+    """更换鱼饵页面：固定坐标点击确认/购买。"""
     if not ctx.cooldown.try_fire("change-bait:click", 3.0, ctx.monotonic):
         return
     cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 761, 516)
     exec_msg.msg_out(f"更换鱼饵页面：点击确认/购买)")
     game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+    ctx.apply_logic_state(LOGIC_FISHING)
 
 
 def _page_tip(ctx: TickContext) -> None:
-    """提示页面：固定坐标关闭；买鱼饵逻辑下关闭后回到钓鱼。"""
+    """提示页面：固定坐标关闭；卖鱼逻辑下关闭后切鱼饵；鱼饵逻辑下关闭后回到钓鱼。"""
     if not ctx.cooldown.try_fire("tip:click", 3.0, ctx.monotonic):
         return
     cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 756, 519)
     exec_msg.msg_out(f"提示页面：左键 整窗→客户区 ({cx}, {cy})")
     game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
-    if ctx.logic_state == LOGIC_BUY_BAIT and ctx.apply_logic_state is not None:
+    if ctx.apply_logic_state is None:
+        return
+    if ctx.logic_state == LOGIC_SELL_FISH:
+        ctx.apply_logic_state(LOGIC_BAIT)
+        exec_msg.msg_out("提示页面：卖鱼流程提示已关，切换到鱼饵")
+        return
+    if ctx.logic_state == LOGIC_BAIT:
         ctx.apply_logic_state(LOGIC_FISHING)
-        exec_msg.msg_out("提示页面：买鱼饵逻辑已完成，切回钓鱼")
+        exec_msg.msg_out("提示页面：鱼饵流程已完成，切回钓鱼")
+
+
+def _page_tip_no_fish(ctx: TickContext) -> None:
+    """未获得鱼页面：固定坐标关闭后切换到鱼饵逻辑。"""
+    if not ctx.cooldown.try_fire("tip-no-fish:click", 3.0, ctx.monotonic):
+        return
+    game_input.send_key_tap(ctx.hwnd, game_input.VK_ESCAPE)
+    exec_msg.msg_out(f"未获得鱼页面：ESC 关闭")
+    if ctx.apply_logic_state is not None:
+        ctx.apply_logic_state(LOGIC_BAIT)
+        exec_msg.msg_out("未获得鱼页面：切换到鱼饵逻辑")
 
 
 _UNIVERSAL_BAIT_TEMPLATE = DEFAULT_PAGES_JSON.parent / "万能鱼饵.png"
 
 
 def _page_shop(ctx: TickContext) -> None:
-    """渔具商店：买鱼饵逻辑下按 ESC 关闭；否则在 ROI 内匹配万能鱼饵并点击购买。"""
+    """渔具商店：钓鱼逻辑下按 ESC 关闭；鱼饵逻辑在 ROI 内匹配万能鱼饵并点击购买。"""
     if ctx.logic_state == LOGIC_FISHING:
         if not ctx.cooldown.try_fire("shop:buy-bait-esc", 3.0, ctx.monotonic):
             return
-        exec_msg.msg_out("渔具商店（买鱼饵逻辑）：ESC 键按下")
+        exec_msg.msg_out("渔具商店：ESC 键按下")
         game_input.send_key_tap(ctx.hwnd, game_input.VK_ESCAPE)
         return
 
@@ -237,7 +266,7 @@ def _page_shop(ctx: TickContext) -> None:
         cropped,
         _UNIVERSAL_BAIT_TEMPLATE,
         SHOP_UNIVERSAL_BAIT_REGION_PRECROP,
-        threshold=0.5,
+        threshold=0.8,
     )
     if r is None:
         return
@@ -258,6 +287,28 @@ def _page_shop(ctx: TickContext) -> None:
     game_input.send_left_click_physical(ctx.hwnd, cx3, cy3, hover_dwell_s=0.45, hold_s=0.2)
 
 
+def _page_market(ctx: TickContext) -> None:
+    """渔获市场页面：固定坐标点击进入归流鱼舱等。"""
+    if not ctx.cooldown.try_fire("market:click", 3.0, ctx.monotonic):
+        return
+    cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 100, 327)
+    exec_msg.msg_out(f"渔获市场页面：点击归流鱼仓")
+    game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+
+
+def _page_fish_storage(ctx: TickContext) -> None:
+    """归流鱼舱：卖鱼逻辑下固定坐标点击；否则 ESC 关闭。"""
+    if not ctx.cooldown.try_fire("fish-storage:action", 3.0, ctx.monotonic):
+        return
+    if ctx.logic_state != LOGIC_SELL_FISH:
+        exec_msg.msg_out("归流鱼舱页面：ESC 关闭")
+        game_input.send_key_tap(ctx.hwnd, game_input.VK_ESCAPE)
+        return
+    cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 687, 690)
+    exec_msg.msg_out(f"归流鱼舱页面：点击卖出")
+    game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+
+
 PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
     "reeling": _page_reeling,
     "start-fishing": _page_start_fishing,
@@ -270,7 +321,10 @@ PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
     "no-bait": _page_no_bait,
     "change-bait": _page_change_bait,
     "shop": _page_shop,
+    "market": _page_market,
+    "fish-storage": _page_fish_storage,
     "tip": _page_tip,
+    "tip-no-fish": _page_tip_no_fish,
 }
 
 

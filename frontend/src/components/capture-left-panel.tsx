@@ -8,8 +8,7 @@ import { FPS_MAX, FPS_MIN, MATCH_TH_MAX, MATCH_TH_MIN, useCaptureSession } from 
 const LOGIC_OPTIONS: { id: AutoFishLogicState; label: string }[] = [
 	{ id: 'fishing', label: '钓鱼' },
 	{ id: 'sell-fish', label: '卖鱼' },
-	{ id: 'buy-bait', label: '买鱼饵' },
-	{ id: 'change-bait', label: '换鱼饵' }
+	{ id: 'bait', label: '鱼饵' }
 ]
 
 export function CaptureLeftPanel() {
@@ -41,7 +40,7 @@ export function CaptureLeftPanel() {
 					<Icon name='icon-diy' size={18} bounce />
 					<span className='text-xs font-medium text-[#725d42]'>逻辑状态</span>
 				</div>
-				<div className='grid grid-cols-2 gap-1.5'>
+				<div className='grid grid-cols-3 gap-1.5'>
 					{LOGIC_OPTIONS.map(opt => {
 						const on = opt.id === activeLogic
 						return (

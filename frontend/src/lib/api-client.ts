@@ -63,7 +63,7 @@ export function postCaptureMatchThreshold(threshold: number) {
 	})
 }
 
-export type AutoFishLogicState = 'fishing' | 'sell-fish' | 'buy-bait' | 'change-bait'
+export type AutoFishLogicState = 'fishing' | 'sell-fish' | 'bait'
 
 export type AutoFishStatusResponse = {
 	running: boolean

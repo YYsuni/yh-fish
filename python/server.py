@@ -40,7 +40,7 @@ class SetMatchThresholdBody(BaseModel):
 class SetAutoFishLogicBody(BaseModel):
     """POST `/api/auto-fish/logic`：手动切换自动执行逻辑状态。"""
 
-    logic_state: Literal["fishing", "sell-fish", "buy-bait", "change-bait"]
+    logic_state: Literal["fishing", "sell-fish", "bait"]
 
 
 def create_app(
@@ -130,7 +130,7 @@ def create_app(
 
     @app.post("/api/auto-fish/logic")
     def auto_fish_set_logic(body: SetAutoFishLogicBody) -> dict[str, object]:
-        """切换钓鱼 / 卖鱼 / 买饵 / 换饵逻辑（与执行器 `logic_state` 一致）。"""
+        """切换钓鱼 / 卖鱼 / 鱼饵逻辑（与执行器 `logic_state` 一致）。"""
         return auto_fish.set_logic_state(body.logic_state)
 
     @app.get("/api/msg/log")
