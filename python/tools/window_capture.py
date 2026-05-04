@@ -6,6 +6,10 @@ from __future__ import annotations
 import re
 import sys
 
+# WGC 整帧 JPEG 与 `capture_service._decode_and_crop_rgb`、`pages.json`「整窗未裁」坐标系对齐的边距（像素）。
+WGC_SNAPSHOT_MARGIN_LR_PX = 2
+WGC_SNAPSHOT_MARGIN_BOTTOM_PX = 2
+
 if sys.platform != "win32":
 
     def find_game_hwnd(title_regex: str) -> int | None:  # noqa: ARG001
@@ -59,3 +63,15 @@ else:
         if not user32.ClientToScreen(hwnd, ctypes.byref(pt)):
             return 0
         return max(0, int(pt.y - outer.top))
+
+
+def wgc_precrop_xy_to_client(hwnd: int, precrop_x: int, precrop_y: int) -> tuple[int, int]:
+    """将 WGC 整帧（含标题栏与左右约 ``WGC_SNAPSHOT_MARGIN_LR_PX`` 阴影带）像素坐标转为 HWND 客户区坐标。
+
+    与 ``capture_service._decode_and_crop_rgb`` 的裁切一致：左减 ``WGC_SNAPSHOT_MARGIN_LR_PX``，上减
+    ``window_title_bar_crop_px``。供 ``game_input.send_left_click_physical`` 等需 ``ClientToScreen`` 的路径在
+    传入「整窗截图」坐标前先调用。
+    """
+    h = int(hwnd)
+    top = window_title_bar_crop_px(h)
+    return (int(precrop_x) - WGC_SNAPSHOT_MARGIN_LR_PX, int(precrop_y) - top)

@@ -13,6 +13,7 @@ from capture_service import CaptureService
 
 import tools.exec_msg as exec_msg
 import tools.game_input as game_input
+from tools.window_capture import wgc_precrop_xy_to_client
 
 _log = logging.getLogger(__name__)
 
@@ -135,8 +136,8 @@ def _page_start_fishing(ctx: TickContext) -> None:
     if ctx.logic_state == LOGIC_SELL_FISH:
         if not ctx.cooldown.try_fire("start-fishing:sell-click", 3.0, ctx.monotonic):
             return
-        cx, cy = 1010, 707
-        exec_msg.msg_out(f"开始钓鱼页面（卖鱼）：左键 ({cx}, {cy})")
+        cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 1010, 707)
+        exec_msg.msg_out(f"开始钓鱼页面（卖鱼）：左键 整窗→客户区 ({cx}, {cy})")
         game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
         return
     _tap_f_cooldown(ctx, "start-fishing", "开始钓鱼页面")
@@ -147,15 +148,20 @@ def _page_waiting_for_bite(ctx: TickContext) -> None:
 
 
 def _page_fishing_prep(ctx: TickContext) -> None:
-    if ctx.logic_state != LOGIC_FISHING:
-        if ctx.logic_state == LOGIC_BUY_BAIT:
-            return
-        if ctx.apply_logic_state is not None:
-            ctx.apply_logic_state(LOGIC_BUY_BAIT)
-        exec_msg.msg_out("钓鱼准备页面：已进入买鱼饵逻辑")
+    if ctx.logic_state == LOGIC_FISHING:
+        if _click_page_match(ctx, "fishing-prep", "钓鱼准备页面", physical=True):
+            time.sleep(1.5)
         return
-    if _click_page_match(ctx, "fishing-prep", "钓鱼准备页面", physical=True):
-        time.sleep(1.5)
+    if ctx.logic_state == LOGIC_BUY_BAIT:
+        if not ctx.cooldown.try_fire("fishing-prep:buy-bait-click", 3.0, ctx.monotonic):
+            return
+        cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 1136, 556)
+        exec_msg.msg_out(f"钓鱼准备页面：选择鱼饵")
+        game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+        return
+    if ctx.apply_logic_state is not None:
+        ctx.apply_logic_state(LOGIC_BUY_BAIT)
+    exec_msg.msg_out("钓鱼准备页面：已进入买鱼饵逻辑")
 
 
 def _page_fishing_end(ctx: TickContext) -> None:
@@ -187,11 +193,11 @@ def _page_no_bait(ctx: TickContext) -> None:
 
 
 def _page_change_bait(ctx: TickContext) -> None:
-    """更换鱼饵页：固定坐标左键（与 `pages.json` id `change-bait` 对应）。"""
+    """更换鱼饵页"""
     if not ctx.cooldown.try_fire("change-bait:click", 3.0, ctx.monotonic):
         return
-    cx, cy = 761, 516
-    exec_msg.msg_out(f"更换鱼饵页面：左键 ({cx}, {cy})")
+    cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 761, 516)
+    exec_msg.msg_out(f"更换鱼饵页面：点击确认/购买)")
     game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
 
 

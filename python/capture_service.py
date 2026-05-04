@@ -19,6 +19,7 @@ from tools.capture_pipeline_debug import (
     perf_elapsed_ms,
 )
 from tools.page_template_match import PageMatchResult, PageTemplateMatcher, run_reeling_bar_templates
+from tools.window_capture import WGC_SNAPSHOT_MARGIN_BOTTOM_PX, WGC_SNAPSHOT_MARGIN_LR_PX
 
 _log = logging.getLogger(__name__)
 
@@ -37,8 +38,6 @@ DEFAULT_TITLE_REGEX = r"^\s*(异环|NTE)\s*$"
 WGC_JPEG_QUALITY = 72
 # 预览 JPEG：quality 越低编码越快、体积越小；optimize=False 避免额外扫描。
 PREVIEW_JPEG_QUALITY = 65
-CROP_MARGIN_LR_PX = 2
-CROP_MARGIN_BOTTOM_PX = 2
 # 预览编码前是否缩小：>0 为最大宽度（像素）；0 表示不缩小。
 PREVIEW_MAX_WIDTH = 800
 FPS_MIN = 1.0
@@ -101,10 +100,10 @@ def _decode_and_crop_rgb(jpeg: bytes, title_top_px: int) -> Image.Image | None:
         return None
     w, h = img.size
     t = max(0, title_top_px)
-    x0 = CROP_MARGIN_LR_PX
+    x0 = WGC_SNAPSHOT_MARGIN_LR_PX
     y0 = t
-    x1 = w - CROP_MARGIN_LR_PX
-    y1 = h - CROP_MARGIN_BOTTOM_PX
+    x1 = w - WGC_SNAPSHOT_MARGIN_LR_PX
+    y1 = h - WGC_SNAPSHOT_MARGIN_BOTTOM_PX
     if x1 <= x0 or y1 <= y0:
         return None
     return img.crop((x0, y0, x1, y1))

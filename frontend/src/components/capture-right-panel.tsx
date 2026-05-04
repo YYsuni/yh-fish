@@ -23,11 +23,13 @@ export function CaptureRightPanel() {
 					aria-live='polite'>
 					{formatLiveFpsLabel(liveFps)}
 				</div>
-				<div
-					className='pointer-events-none absolute top-3 right-2 z-10 rounded-lg bg-[#fc736d]/95 p-2 px-2.5 py-1 text-xs leading-none font-medium tracking-tight text-white shadow-sm'
-					aria-live='polite'>
-					{summaryMatch?.page_label}
-				</div>
+				{summaryMatch?.page_label && (
+					<div
+						className='pointer-events-none absolute top-3 right-2 z-10 rounded-lg bg-[#fc736d]/95 p-2 px-2.5 py-1 text-xs leading-none font-medium tracking-tight text-white shadow-sm'
+						aria-live='polite'>
+						{summaryMatch?.page_label}
+					</div>
+				)}
 				{matchBoxCss && <div className='pointer-events-none absolute z-9 rounded-sm ring-2 ring-[#fc736d]' style={matchBoxCss} aria-hidden />}
 				{reelingBarOverlayBoxes?.map(b => (
 					<div key={b.key} className={`pointer-events-none absolute z-11 rounded-sm ring-2 ring-[#fc736d]`} style={b.style} aria-hidden />

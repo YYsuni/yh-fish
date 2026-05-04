@@ -12,11 +12,13 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from tools.window_capture import WGC_SNAPSHOT_MARGIN_LR_PX
+
 DEFAULT_PAGES_JSON = Path(__file__).resolve().parents[1] / "images" / "auto_fish" / "pages.json"
 DEFAULT_MATCH_THRESHOLD = 0.5
 # pages.json 的 region 基于“未裁剪前整窗截图”的坐标；捕获时会默认裁掉这些边缘。
 DEFAULT_PRE_CROP_TOP_PX = 52
-DEFAULT_PRE_CROP_LEFT_PX = 2
+DEFAULT_PRE_CROP_LEFT_PX = WGC_SNAPSHOT_MARGIN_LR_PX
 
 
 @dataclass(frozen=True)
