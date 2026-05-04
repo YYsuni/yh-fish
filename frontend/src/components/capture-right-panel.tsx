@@ -4,11 +4,8 @@ import { MsgTerminalPanel } from './msg-terminal-panel'
 
 export function CaptureRightPanel() {
 	const { capture, error, preview, canvasRef, matchBoxCss, reelingBarOverlayBoxes } = useCaptureSession()
-	const { liveFps, pageMatch, reelingBarDebug } = preview
+	const { liveFps, pageMatch } = preview
 	const summaryMatch = pageMatch ?? parsePageMatch(capture?.page_match ?? null)
-	const pageId = summaryMatch?.page_id ?? ''
-	const showReelingMeta = pageId === 'reeling' && reelingBarDebug != null
-
 	return (
 		<div className='flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto'>
 			<div className='flex items-center gap-2'>
@@ -50,7 +47,14 @@ export function CaptureRightPanel() {
 				<Card color='app-blue' className='p-3'>
 					<p className='text-xs font-medium tracking-wider uppercase opacity-90'>窗口尺寸</p>
 					<p className='mt-1 font-mono text-sm font-medium'>
-						{capture && capture?.width === 1280 ? `${capture?.width} × ${capture?.height}` : capture?.width > 0 ? '必须为 1280x720' : '—'}
+						{(() => {
+							const w = capture?.width ?? 0
+							const h = capture?.height ?? 0
+							if (!capture) return '—'
+							if (w === 1280) return `${w} × ${h}`
+							if (w > 0) return '必须为 1280x720'
+							return '—'
+						})()}
 					</p>
 				</Card>
 			</div>

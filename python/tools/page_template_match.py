@@ -12,9 +12,11 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from app_paths import python_pkg_root
 from tools.window_capture import WGC_SNAPSHOT_MARGIN_LR_PX
 
-DEFAULT_PAGES_JSON = Path(__file__).resolve().parents[1] / "images" / "auto_fish" / "pages.json"
+_AUTO_FISH_IMG = python_pkg_root() / "images" / "auto_fish"
+DEFAULT_PAGES_JSON = _AUTO_FISH_IMG / "pages.json"
 DEFAULT_MATCH_THRESHOLD = 0.5
 # pages.json 的 region 基于“未裁剪前整窗截图”的坐标；捕获时会默认裁掉这些边缘。
 DEFAULT_PRE_CROP_TOP_PX = 52
@@ -226,7 +228,7 @@ def run_reeling_bar_templates(
     cropped_rgb: Image.Image,
 ) -> tuple[dict[str, object], tuple[tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None]]:
     """正在溜鱼页：在溜鱼条 ROI 内匹配左/右边缘；刻度在条带竖直中心单行上按浅黄 (#FEF7A5) 扫 x。返回 ``(API 可序列化 debug, (左,右,刻度) 三元组)``。"""
-    base = Path(__file__).resolve().parents[1] / "images" / "auto_fish"
+    base = _AUTO_FISH_IMG
     t0 = time.perf_counter()
     trips: list[tuple[int, int, int, int, float] | None] = []
     items: list[dict[str, object]] = []

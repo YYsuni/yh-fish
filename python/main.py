@@ -17,7 +17,9 @@ from server import create_app
 
 
 def root() -> Path:
-    """仓库根目录。"""
+    """仓库根目录；冻结构建下为 exe 所在目录（与 `frontend/dist` 同级）。"""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[1]
 
 
@@ -43,10 +45,16 @@ def main(argv: list[str] | None = None) -> None:
     static = not args.dev
 
     if static and not d.is_dir():
-        print(
-            f"缺少 {d}\ncd frontend && pnpm i && pnpm build\n或 python python/main.py --dev",
-            file=sys.stderr,
-        )
+        msg = f"缺少前端资源目录：\n{d}\n\n请重新安装，或使用开发模式：\npython python/main.py --dev"
+        if getattr(sys, "frozen", False):
+            try:
+                import ctypes
+
+                ctypes.windll.user32.MessageBoxW(0, msg, "异环钓鱼工具", 0x10)
+            except Exception:
+                pass
+        else:
+            print(msg, file=sys.stderr)
         sys.exit(1)
 
     cap = CaptureService()
@@ -58,7 +66,7 @@ def main(argv: list[str] | None = None) -> None:
     time.sleep(0.35)
 
     url = args.url if args.dev else f"http://{args.host}:{args.port}"
-    webview.create_window("异环钓鱼", url, width=960, height=680, min_size=(480, 520), resizable=True)
+    webview.create_window("异环钓鱼工具", url, width=960, height=680, min_size=(480, 520), resizable=True)
 
     try:
         webview.start()

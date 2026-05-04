@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from auto_fish_executor import AutoFishExecutor
 from capture_service import CaptureService
-from tools.exec_msg import snapshot as msg_snapshot
+from tools.exec_msg import snapshot as msg_snapshot, start_admin_warn_loop, stop_admin_warn_loop
 
 _log = logging.getLogger(__name__)
 
@@ -56,6 +56,7 @@ def create_app(
     async def lifespan(_app: FastAPI):
         """进程生命周期内启动/停止捕获后台线程。"""
         capture.start_background()
+        start_admin_warn_loop()
         f12_done = threading.Event()
 
         def _f12() -> None:
@@ -66,6 +67,7 @@ def create_app(
         f12_t = threading.Thread(target=_f12, name="f12-stop", daemon=True)
         f12_t.start()
         yield
+        stop_admin_warn_loop()
         f12_done.set()
         f12_t.join(timeout=2.0)
         auto_fish.stop()

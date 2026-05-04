@@ -32,11 +32,6 @@ const MATCH_TH_MIN = 0
 const MATCH_TH_MAX = 1
 const WS_PREVIEW_HEADER_BYTES = 8
 
-const REELING_OVERLAY_RING: Record<string, string> = {
-	left: 'ring-[#4a9c7c]',
-	right: 'ring-[#5b8fc7]',
-	scale: 'ring-[#c9a227]'
-}
 const REELING_OVERLAY_KEYS = ['left', 'right', 'scale'] as const
 
 export function parsePageMatch(raw: unknown): PageMatchPayload {

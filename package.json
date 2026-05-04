@@ -1,6 +1,7 @@
 {
 	"name": "yh-fish",
 	"version": "1.0.0",
+	"appDisplayName": "异环钓鱼",
 	"main": "index.js",
 	"devDependencies": {
 		"concurrently": "^9.1.2",
@@ -9,7 +10,8 @@
 	},
 	"scripts": {
 		"dev:inner": "concurrently -n frontend,python -c cyan,magenta \"pnpm --dir frontend dev\" \"node scripts/dev-python.mjs\"",
-		"dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-as-admin.ps1"
+		"dev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-as-admin.ps1",
+		"build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1"
 	},
 	"keywords": [],
 	"author": "",
