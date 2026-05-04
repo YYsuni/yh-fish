@@ -144,7 +144,7 @@ def _page_start_fishing(ctx: TickContext) -> None:
         if not ctx.cooldown.try_fire("start-fishing:sell-click", 3.0, ctx.monotonic):
             return
         cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 1010, 707)
-        exec_msg.msg_out(f"开始钓鱼页面（卖鱼）：左键 整窗→客户区 ({cx}, {cy})")
+        exec_msg.msg_out(f"开始钓鱼页面：点击仓库")
         game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
         return
     if ctx.logic_state == LOGIC_BAIT:
@@ -259,6 +259,7 @@ def _page_shop(ctx: TickContext) -> None:
         game_input.send_key_tap(ctx.hwnd, game_input.VK_ESCAPE)
         return
 
+    time.sleep(0.5)
     cropped = ctx.capture.get_last_cropped_rgb_copy()
     if cropped is None:
         return
