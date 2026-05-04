@@ -17,7 +17,7 @@ from tools.window_capture import WGC_SNAPSHOT_MARGIN_LR_PX
 
 _AUTO_FISH_IMG = python_pkg_root() / "images" / "auto_fish"
 DEFAULT_PAGES_JSON = _AUTO_FISH_IMG / "pages.json"
-DEFAULT_MATCH_THRESHOLD = 0.5
+DEFAULT_MATCH_THRESHOLD = 0.7
 # pages.json 的 region 基于“未裁剪前整窗截图”的坐标；捕获时会默认裁掉这些边缘。
 DEFAULT_PRE_CROP_TOP_PX = 52
 DEFAULT_PRE_CROP_LEFT_PX = WGC_SNAPSHOT_MARGIN_LR_PX
@@ -108,18 +108,12 @@ def _match_template_in_roi(
     return (rx + mx, ry + my, tw, th, float(max_v))
 
 
-def match_template_in_precrop_roi(
+def _match_template_in_precrop_roi_raw(
     cropped_rgb: Image.Image,
     template_path: Path,
     region_xywh_precrop: tuple[float, float, float, float],
-    *,
-    threshold: float,
 ) -> tuple[int, int, int, int, float] | None:
-    """在「整窗未裁」坐标系的矩形 ROI 内对单张模板做 TM_CCOEFF_NORMED；`cropped_rgb` 须与捕获管线裁剪后坐标系一致。
-
-    与 `pages.json` 中 `region` 相同：先减 `DEFAULT_PRE_CROP_LEFT_PX` / `DEFAULT_PRE_CROP_TOP_PX`。
-    成功返回 ``(x, y, w, h, confidence)``，否则 None。
-    """
+    """在「整窗未裁」坐标系 ROI 内做 TM_CCOEFF_NORMED，不设阈值。"""
     if not template_path.is_file():
         return None
     try:
@@ -141,7 +135,22 @@ def match_template_in_precrop_roi(
     scene = np.asarray(cropped_rgb.convert("RGB"))
     if scene.ndim != 3 or scene.shape[2] != 3:
         return None
-    r = _match_template_in_roi(scene, region, tpl_rgb)
+    return _match_template_in_roi(scene, region, tpl_rgb)
+
+
+def match_template_in_precrop_roi(
+    cropped_rgb: Image.Image,
+    template_path: Path,
+    region_xywh_precrop: tuple[float, float, float, float],
+    *,
+    threshold: float,
+) -> tuple[int, int, int, int, float] | None:
+    """在「整窗未裁」坐标系的矩形 ROI 内对单张模板做 TM_CCOEFF_NORMED；`cropped_rgb` 须与捕获管线裁剪后坐标系一致。
+
+    与 `pages.json` 中 `region` 相同：先减 `DEFAULT_PRE_CROP_LEFT_PX` / `DEFAULT_PRE_CROP_TOP_PX`。
+    成功返回 ``(x, y, w, h, confidence)``，否则 None。
+    """
+    r = _match_template_in_precrop_roi_raw(cropped_rgb, template_path, region_xywh_precrop)
     if r is None:
         return None
     _x, _y, _w, _h, conf = r
@@ -150,8 +159,17 @@ def match_template_in_precrop_roi(
     return r
 
 
-# 渔具商店内「万能鱼饵」模板搜索区；整窗未裁坐标系 [x, y, w, h]（与 `pages.json` region 一致）
-SHOP_UNIVERSAL_BAIT_REGION_PRECROP = (28, 133.99, 424, 328)
+def match_template_score_in_precrop_roi(
+    cropped_rgb: Image.Image,
+    template_path: Path,
+    region_xywh_precrop: tuple[float, float, float, float],
+) -> float | None:
+    """同 `_match_template_in_precrop_roi_raw` 的峰值相似度；失败为 None（不设阈值，便于多模板比大小）。"""
+    r = _match_template_in_precrop_roi_raw(cropped_rgb, template_path, region_xywh_precrop)
+    if r is None:
+        return None
+    return float(r[4])
+
 
 # 与 `auto_fish_executor._page_reeling` 同一 ROI 与阈值；整窗未裁坐标系 [x, y, w, h]
 REELING_BAR_MATCH_THRESHOLD = 0.8
@@ -439,10 +457,9 @@ class PageTemplateMatcher:
         scene = np.asarray(cropped_rgb.convert("RGB"))
         if scene.ndim != 3 or scene.shape[2] != 3:
             return None
-        th_val = self._threshold
 
         for pid, label, feats in self._pages_ordered:
-            box = _eval_page_features(feats, scene, th_val)
+            box = _eval_page_features(feats, scene, self._threshold)
             if box is None:
                 continue
             bx, by, bw, bh, conf = box

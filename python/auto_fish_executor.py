@@ -15,8 +15,8 @@ import tools.exec_msg as exec_msg
 import tools.game_input as game_input
 from tools.page_template_match import (
     DEFAULT_PAGES_JSON,
-    SHOP_UNIVERSAL_BAIT_REGION_PRECROP,
     match_template_in_precrop_roi,
+    match_template_score_in_precrop_roi,
 )
 from tools.window_capture import wgc_precrop_xy_to_client
 
@@ -184,6 +184,14 @@ def _page_fishing_end(ctx: TickContext) -> None:
     game_input.send_key_tap(ctx.hwnd, game_input.VK_ESCAPE)
 
 
+def _page_empty(ctx: TickContext) -> None:
+    """空页面（点击空白区域关闭提示）：按 ESC 关闭（带冷却）。"""
+    if not ctx.cooldown.try_fire("empty", 3.0, ctx.monotonic):
+        return
+    exec_msg.msg_out("空页面：ESC 键按下")
+    game_input.send_key_tap(ctx.hwnd, game_input.VK_ESCAPE)
+
+
 def _page_fishing_interact(ctx: TickContext) -> None:
     """钓鱼交互页面：按 F（带冷却）。"""
     _tap_f_cooldown(ctx, "fishing-interact", "钓鱼交互页面")
@@ -209,13 +217,35 @@ def _page_no_bait(ctx: TickContext) -> None:
 
 
 def _page_change_bait(ctx: TickContext) -> None:
-    """更换鱼饵页面：固定坐标点击确认/购买。"""
+    """更换鱼饵页面：ROI 内比较「确认」「购买」相似度后切逻辑，再固定坐标点击。"""
     if not ctx.cooldown.try_fire("change-bait:click", 3.0, ctx.monotonic):
         return
+    cropped = ctx.capture.get_last_cropped_rgb_copy()
+    region = (747, 507.99, 69, 32)
+    s_change = (
+        match_template_score_in_precrop_roi(
+            cropped,
+            DEFAULT_PAGES_JSON.parent / "更换.png",
+            region,
+        )
+        if cropped is not None
+        else None
+    )
+    s_purchase = (
+        match_template_score_in_precrop_roi(
+            cropped,
+            DEFAULT_PAGES_JSON.parent / "购买.png",
+            region,
+        )
+        if cropped is not None
+        else None
+    )
+    c_change = float("-inf") if s_change is None else float(s_change)
+    c_pur = float("-inf") if s_purchase is None else float(s_purchase)
+    ctx.apply_logic_state(LOGIC_FISHING if c_change > c_pur else LOGIC_BAIT)
     cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 761, 516)
-    exec_msg.msg_out(f"更换鱼饵页面：点击确认/购买)")
+
     game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
-    ctx.apply_logic_state(LOGIC_FISHING)
 
 
 def _page_tip(ctx: TickContext) -> None:
@@ -229,7 +259,7 @@ def _page_tip(ctx: TickContext) -> None:
         return
     if ctx.logic_state == LOGIC_SELL_FISH:
         ctx.apply_logic_state(LOGIC_BAIT)
-        exec_msg.msg_out("提示页面：卖鱼流程提示已关，切换到鱼饵")
+        exec_msg.msg_out("提示页面：卖鱼流程已完成，切换到鱼饵")
         return
     if ctx.logic_state == LOGIC_BAIT:
         ctx.apply_logic_state(LOGIC_FISHING)
@@ -247,9 +277,6 @@ def _page_tip_no_fish(ctx: TickContext) -> None:
         exec_msg.msg_out("未获得鱼页面：切换到鱼饵逻辑")
 
 
-_UNIVERSAL_BAIT_TEMPLATE = DEFAULT_PAGES_JSON.parent / "万能鱼饵.png"
-
-
 def _page_shop(ctx: TickContext) -> None:
     """渔具商店：钓鱼逻辑下按 ESC 关闭；鱼饵逻辑在 ROI 内匹配万能鱼饵并点击购买。"""
     if ctx.logic_state == LOGIC_FISHING:
@@ -265,10 +292,11 @@ def _page_shop(ctx: TickContext) -> None:
         return
     r = match_template_in_precrop_roi(
         cropped,
-        _UNIVERSAL_BAIT_TEMPLATE,
-        SHOP_UNIVERSAL_BAIT_REGION_PRECROP,
+        DEFAULT_PAGES_JSON.parent / "万能鱼饵.png",
+        (28, 133.99, 424, 328),
         threshold=0.8,
     )
+    exec_msg.msg_out(f"渔具商店：匹配鱼饵结果：{r}")
     if r is None:
         return
     if not ctx.cooldown.try_fire("shop:universal-bait-sequence", 4.0, ctx.monotonic):
@@ -284,7 +312,7 @@ def _page_shop(ctx: TickContext) -> None:
     game_input.send_left_click_physical(ctx.hwnd, cx2, cy2, hover_dwell_s=0.45, hold_s=0.2)
     time.sleep(0.4)
     cx3, cy3 = wgc_precrop_xy_to_client(ctx.hwnd, 1026, 736)
-    exec_msg.msg_out(f"渔具商店：点击确认/购买")
+    exec_msg.msg_out(f"渔具商店：点击购买")
     game_input.send_left_click_physical(ctx.hwnd, cx3, cy3, hover_dwell_s=0.45, hold_s=0.2)
 
 
@@ -308,6 +336,7 @@ def _page_fish_storage(ctx: TickContext) -> None:
     cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 687, 690)
     exec_msg.msg_out(f"归流鱼舱页面：点击卖出")
     game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+    ctx.apply_logic_state(LOGIC_BAIT)
 
 
 PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
@@ -326,6 +355,7 @@ PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
     "fish-storage": _page_fish_storage,
     "tip": _page_tip,
     "tip-no-fish": _page_tip_no_fish,
+    "empty": _page_empty,
 }
 
 
