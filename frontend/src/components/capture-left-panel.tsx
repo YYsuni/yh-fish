@@ -1,7 +1,7 @@
-import { Button, Divider, Icon } from 'animal-island-ui'
+import { Button, Divider, Icon, Switch } from 'animal-island-ui'
 import { useState } from 'react'
 import { useAutoFishStatus } from '../hooks/use-auto-fish-status'
-import { postAutoFishLogicState, type AutoFishLogicState } from '../lib/api-client'
+import { postAutoFishLogicState, postAutoFishSellOnNoBait, type AutoFishLogicState } from '../lib/api-client'
 import { AutoFishControls } from './auto-fish-controls'
 import { FPS_MAX, FPS_MIN, MATCH_TH_MAX, MATCH_TH_MIN, useCaptureSession } from './capture-session-context'
 
@@ -16,7 +16,9 @@ export function CaptureLeftPanel() {
 	const busy = fps.saving || matchTh.saving
 	const fish = useAutoFishStatus()
 	const [logicBusy, setLogicBusy] = useState(false)
+	const [sellOnNoBaitBusy, setSellOnNoBaitBusy] = useState(false)
 	const activeLogic = fish.status?.logic_state ?? 'fishing'
+	const sellFishOnNoBait = fish.status?.sell_fish_on_no_bait ?? true
 
 	const onPickLogic = async (id: AutoFishLogicState) => {
 		if (id === activeLogic || logicBusy) return
@@ -40,6 +42,27 @@ export function CaptureLeftPanel() {
 					<Icon name='icon-diy' size={18} bounce />
 					<span className='text-xs font-medium text-[#725d42]'>逻辑状态</span>
 				</div>
+				<p className='text-xs text-[#725d42]'>{`钓鱼 -> (提示无鱼饵) -> ${sellFishOnNoBait ? '一键卖鱼 -> ' : ''}鱼饵 -> 钓鱼`}</p>
+				<div className='flex items-center gap-2'>
+					<span className='text-xs font-medium text-[#725d42]'>是否卖鱼</span>
+					<Switch
+						size='small'
+						checked={sellFishOnNoBait}
+						loading={sellOnNoBaitBusy}
+						disabled={sellOnNoBaitBusy}
+						onChange={async v => {
+							setSellOnNoBaitBusy(true)
+							try {
+								await postAutoFishSellOnNoBait(v)
+								await fish.refresh()
+							} catch (e) {
+								console.error(e)
+							} finally {
+								setSellOnNoBaitBusy(false)
+							}
+						}}
+					/>
+				</div>
 				<div className='grid grid-cols-3 gap-1.5'>
 					{LOGIC_OPTIONS.map(opt => {
 						const on = opt.id === activeLogic
@@ -58,12 +81,9 @@ export function CaptureLeftPanel() {
 										void onPickLogic(opt.id)
 									}
 								}}
-								className={`cursor-pointer select-none rounded-md px-2 py-2 text-center text-xs font-medium transition-colors ${
-									on
-										? 'bg-[#c9a882] text-[#2a2218] shadow-[inset_0_-2px_0_rgba(0,0,0,0.12)]'
-										: 'bg-[#ebe4d6] text-[#4a3d2e] hover:bg-[#e0d8c8]'
-								} ${logicBusy ? 'pointer-events-none opacity-60' : ''}`}
-							>
+								className={`cursor-pointer rounded-md px-2 py-2 text-center text-xs font-medium transition-colors select-none ${
+									on ? 'bg-[#c9a882] text-[#2a2218] shadow-[inset_0_-2px_0_rgba(0,0,0,0.12)]' : 'bg-[#ebe4d6] text-[#4a3d2e] hover:bg-[#e0d8c8]'
+								} ${logicBusy ? 'pointer-events-none opacity-60' : ''}`}>
 								{opt.label}
 							</div>
 						)

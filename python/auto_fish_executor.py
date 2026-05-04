@@ -62,6 +62,7 @@ class TickContext:
     page_match_threshold: float
     logic_state: str = LOGIC_FISHING
     apply_logic_state: Callable[[str], None] | None = field(default=None)
+    sell_fish_on_no_bait: bool = True  # True：无鱼饵切卖鱼；False：直接鱼饵
 
 
 def _click_page_match(
@@ -208,12 +209,17 @@ def _page_fish_escaped(ctx: TickContext) -> None:
 
 
 def _page_no_bait(ctx: TickContext) -> None:
-    """无鱼饵页：在钓鱼逻辑下切换到卖鱼。"""
+    """无鱼饵页：在钓鱼逻辑下按配置切卖鱼或鱼饵。"""
     if ctx.logic_state != LOGIC_FISHING:
         return
-    if ctx.apply_logic_state is not None:
+    if ctx.apply_logic_state is None:
+        return
+    if ctx.sell_fish_on_no_bait:
         ctx.apply_logic_state(LOGIC_SELL_FISH)
-    exec_msg.msg_out("无鱼饵：进入卖鱼逻辑")
+        exec_msg.msg_out("无鱼饵：进入卖鱼逻辑")
+    else:
+        ctx.apply_logic_state(LOGIC_BAIT)
+        exec_msg.msg_out("无鱼饵：进入鱼饵逻辑")
 
 
 def _page_change_bait(ctx: TickContext) -> None:
@@ -380,6 +386,7 @@ class AutoFishExecutor:
         self._cooldown = CooldownGate()
         self._last_page_id: str | None = None
         self._logic_state: str = LOGIC_FISHING
+        self._sell_fish_on_no_bait: bool = True
 
     def is_running(self) -> bool:
         t = self._thread
@@ -389,10 +396,12 @@ class AutoFishExecutor:
         with self._lock:
             last = self._last_page_id
             logic = self._logic_state
+            sell_on_no = self._sell_fish_on_no_bait
         return {
             "running": self.is_running(),
             "last_page_id": last,
             "logic_state": logic,
+            "sell_fish_on_no_bait": sell_on_no,
         }
 
     def _apply_logic_state(self, logic_state: str) -> None:
@@ -408,6 +417,11 @@ class AutoFishExecutor:
         label = _LOGIC_LABELS.get(logic_state, logic_state)
         self._apply_logic_state(logic_state)
         exec_msg.msg_out(f"逻辑切换为：{label}")
+        return self.status_dict()
+
+    def set_sell_fish_on_no_bait(self, enabled: bool) -> dict[str, object]:
+        with self._lock:
+            self._sell_fish_on_no_bait = bool(enabled)
         return self.status_dict()
 
     def start(self) -> dict[str, object]:
@@ -454,6 +468,7 @@ class AutoFishExecutor:
 
             with self._lock:
                 logic_effective = self._logic_state
+                sell_on_no_bait = self._sell_fish_on_no_bait
 
             ctx = TickContext(
                 hwnd=hwnd,
@@ -464,6 +479,7 @@ class AutoFishExecutor:
                 page_match_threshold=float(s.page_match_threshold),
                 logic_state=logic_effective,
                 apply_logic_state=self._apply_logic_state,
+                sell_fish_on_no_bait=sell_on_no_bait,
             )
             try:
                 if page_id:

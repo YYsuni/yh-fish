@@ -69,6 +69,8 @@ export type AutoFishStatusResponse = {
 	running: boolean
 	last_page_id: string | null
 	logic_state: AutoFishLogicState
+	/** 无鱼饵时是否走卖鱼；false 时直接切鱼饵逻辑 */
+	sell_fish_on_no_bait: boolean
 }
 
 export function getAutoFishStatus() {
@@ -93,6 +95,13 @@ export function postAutoFishLogicState(logic_state: AutoFishLogicState) {
 	return fetchJson<AutoFishStatusResponse>('/api/auto-fish/logic', {
 		method: 'POST',
 		body: JSON.stringify({ logic_state })
+	})
+}
+
+export function postAutoFishSellOnNoBait(enabled: boolean) {
+	return fetchJson<AutoFishStatusResponse>('/api/auto-fish/sell-on-no-bait', {
+		method: 'POST',
+		body: JSON.stringify({ enabled })
 	})
 }
 

@@ -43,6 +43,12 @@ class SetAutoFishLogicBody(BaseModel):
     logic_state: Literal["fishing", "sell-fish", "bait"]
 
 
+class SetAutoFishSellOnNoBaitBody(BaseModel):
+    """POST `/api/auto-fish/sell-on-no-bait`：无鱼饵时是否走卖鱼流程（关则直接鱼饵）。"""
+
+    enabled: bool
+
+
 def create_app(
     *,
     capture: CaptureService,
@@ -134,6 +140,11 @@ def create_app(
     def auto_fish_set_logic(body: SetAutoFishLogicBody) -> dict[str, object]:
         """切换钓鱼 / 卖鱼 / 鱼饵逻辑（与执行器 `logic_state` 一致）。"""
         return auto_fish.set_logic_state(body.logic_state)
+
+    @app.post("/api/auto-fish/sell-on-no-bait")
+    def auto_fish_set_sell_on_no_bait(body: SetAutoFishSellOnNoBaitBody) -> dict[str, object]:
+        """无鱼饵时是否进入卖鱼逻辑；关闭则进入鱼饵逻辑。"""
+        return auto_fish.set_sell_fish_on_no_bait(body.enabled)
 
     @app.get("/api/msg/log")
     def msg_log() -> dict[str, Any]:
