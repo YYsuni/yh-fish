@@ -85,7 +85,7 @@ def _noop_page(ctx: TickContext) -> None:
 
 
 def _page_reeling(ctx: TickContext) -> None:
-    """正在溜鱼页面：在溜鱼条 ROI 内匹配左/右边缘与刻度，按刻度相对安全区发 A/D。"""
+    """正在溜鱼页面：在溜鱼条 ROI 内匹配左/右边缘与刻度；安全区为左右内缘之间宽度的中间一半，刻度在其外才发 A/D。"""
     if not ctx.cooldown.try_fire("reeling:bar", 0.2, ctx.monotonic):
         return
     triples = ctx.capture.get_last_reeling_bar_triples()
@@ -101,12 +101,17 @@ def _page_reeling(ctx: TickContext) -> None:
     right_inner = rx
     if left_inner >= right_inner:
         return
+    span = float(right_inner - left_inner)
+    safe_lo = left_inner + span * 0.25
+    safe_hi = right_inner - span * 0.25
+    if safe_lo >= safe_hi:
+        return
     scale_cx = sx + sw // 2
     hold = 0.2
-    if scale_cx < left_inner:
+    if scale_cx < safe_lo:
         exec_msg.msg_out("溜鱼：刻度偏左，D")
         game_input.send_key_tap(ctx.hwnd, game_input.VK_D, hold_between_down_up_s=hold)
-    elif scale_cx > right_inner:
+    elif scale_cx > safe_hi:
         exec_msg.msg_out("溜鱼：刻度偏右，A")
         game_input.send_key_tap(ctx.hwnd, game_input.VK_A, hold_between_down_up_s=hold)
 

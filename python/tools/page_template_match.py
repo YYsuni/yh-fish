@@ -149,22 +149,83 @@ def match_template_in_precrop_roi(
 # 与 `auto_fish_executor._page_reeling` 同一 ROI 与阈值；整窗未裁坐标系 [x, y, w, h]
 REELING_BAR_MATCH_THRESHOLD = 0.8
 REELING_BAR_REGION_PRECROP = (402.72, 94.16, 484.61, 16.58)
-_REELING_BAR_TEMPLATE_ROWS: tuple[tuple[str, str, str], ...] = (
+# 刻度：在整窗未裁 y = 溜鱼条 y + h/2 的**单行**上按 RGB 扫 x，颜色约 #FEF7A5；返回框 w=1,h=1 便于 scale_cx。
+REELING_SCALE_COLOR_RGB_LOW = (238, 228, 130)
+REELING_SCALE_COLOR_RGB_HIGH = (255, 255, 220)
+REELING_SCALE_COLOR_MIN_CONF = 0.5
+_REELING_BAR_EDGE_TEMPLATE_ROWS: tuple[tuple[str, str, str], ...] = (
     ("left", "溜鱼条-左边缘.png", "左边缘"),
     ("right", "溜鱼条-右边缘.png", "右边缘"),
-    ("scale", "溜鱼条-刻度.png", "刻度"),
 )
+
+
+def _detect_reeling_scale_by_color(
+    cropped_rgb: Image.Image,
+) -> tuple[int, int, int, int, float] | None:
+    """在整窗未裁坐标系溜鱼条竖直中心那一行（映射到裁剪图 y）上，按 RGB 范围在 ROI 水平范围内找刻度 x。"""
+    scene = np.asarray(cropped_rgb.convert("RGB"))
+    if scene.ndim != 3 or scene.shape[2] != 3:
+        return None
+    ih, iw = int(scene.shape[0]), int(scene.shape[1])
+    if ih < 1 or iw < 1:
+        return None
+    try:
+        xp, yp, wp, hp = (
+            float(REELING_BAR_REGION_PRECROP[0]),
+            float(REELING_BAR_REGION_PRECROP[1]),
+            float(REELING_BAR_REGION_PRECROP[2]),
+            float(REELING_BAR_REGION_PRECROP[3]),
+        )
+        y_line_precrop = yp + hp / 2.0
+        rect_adj = _apply_pre_crop_offset(
+            [xp, yp, wp, hp],
+            left_px=DEFAULT_PRE_CROP_LEFT_PX,
+            top_px=DEFAULT_PRE_CROP_TOP_PX,
+        )
+        region = tuple(int(round(float(v))) for v in rect_adj)
+        y_row = int(round(y_line_precrop - float(DEFAULT_PRE_CROP_TOP_PX)))
+    except (TypeError, ValueError):
+        return None
+    rx, _ry, rw, _rh = region
+    if rw <= 0:
+        return None
+    y_row = max(0, min(ih - 1, y_row))
+    x0 = max(0, rx)
+    x1 = min(iw, rx + rw)
+    if x1 <= x0:
+        return None
+    row = scene[y_row : y_row + 1, x0:x1, :].reshape(-1, 3)
+    lo = np.array(REELING_SCALE_COLOR_RGB_LOW, dtype=np.uint8)
+    hi = np.array(REELING_SCALE_COLOR_RGB_HIGH, dtype=np.uint8)
+    mask = np.all((row >= lo) & (row <= hi), axis=1).astype(np.float64)
+    peak = float(mask.max()) if mask.size else 0.0
+    if peak <= 0.0:
+        return None
+    thr = peak * 0.45
+    xs = np.flatnonzero(mask >= thr)
+    if xs.size == 0:
+        xs = np.array([int(np.argmax(mask))], dtype=np.int64)
+        wts = mask[xs]
+    else:
+        wts = mask[xs]
+    cx_rel = float(np.sum(xs * wts) / np.sum(wts))
+    conf = min(1.0, peak)
+    if conf < float(REELING_SCALE_COLOR_MIN_CONF):
+        return None
+    cx = int(round(x0 + cx_rel))
+    cx = max(x0, min(x1 - 1, cx))
+    return (cx, int(y_row), 1, 1, float(conf))
 
 
 def run_reeling_bar_templates(
     cropped_rgb: Image.Image,
 ) -> tuple[dict[str, object], tuple[tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None]]:
-    """正在溜鱼页：在溜鱼条 ROI 内匹配左/右边缘与刻度。返回 ``(API 可序列化 debug, (左,右,刻度) 三元组)``。"""
+    """正在溜鱼页：在溜鱼条 ROI 内匹配左/右边缘；刻度在条带竖直中心单行上按浅黄 (#FEF7A5) 扫 x。返回 ``(API 可序列化 debug, (左,右,刻度) 三元组)``。"""
     base = Path(__file__).resolve().parents[1] / "images" / "auto_fish"
     t0 = time.perf_counter()
     trips: list[tuple[int, int, int, int, float] | None] = []
     items: list[dict[str, object]] = []
-    for key, fn, zh_label in _REELING_BAR_TEMPLATE_ROWS:
+    for key, fn, zh_label in _REELING_BAR_EDGE_TEMPLATE_ROWS:
         path = base / fn
         r = match_template_in_precrop_roi(
             cropped_rgb,
@@ -188,6 +249,24 @@ def run_reeling_bar_templates(
                     "similarity": float(conf),
                 }
             )
+    scale_r = _detect_reeling_scale_by_color(cropped_rgb)
+    trips.append(scale_r)
+    if scale_r is None:
+        items.append({"key": "scale", "label": "刻度", "method": "color", "similarity": None})
+    else:
+        sx, sy, sw, sh, sc = scale_r
+        items.append(
+            {
+                "key": "scale",
+                "label": "刻度",
+                "method": "color",
+                "x": int(sx),
+                "y": int(sy),
+                "w": int(sw),
+                "h": int(sh),
+                "similarity": float(sc),
+            }
+        )
     ms = (time.perf_counter() - t0) * 1000.0
     debug: dict[str, object] = {"match_ms": round(ms, 3), "items": items}
     return (debug, (trips[0], trips[1], trips[2]))
