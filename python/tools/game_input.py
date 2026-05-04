@@ -181,14 +181,20 @@ if sys.platform == "win32":
         if hwnd <= 0 or not _user32.IsWindow(wintypes.HWND(hwnd)):
             return
         h = wintypes.HWND(hwnd)
-        if h == _user32.GetForegroundWindow():
+        fg = _user32.GetForegroundWindow()
+        fg_i = int(fg) if fg else 0
+        # 前台是顶层句柄；若传入子窗，直接比 h==fg 会几乎恒为假，反复 SetWindowPos 造成 Z 序闪烁
+        if fg_i and _same_root_hwnd(int(hwnd), fg_i):
             return
         f = _SWP_NOMOVE | _SWP_NOSIZE | _SWP_SHOWWINDOW
         _user32.SetWindowPos(h, wintypes.HWND(_HWND_TOP), 0, 0, 0, 0, f)
         time.sleep(0.005)
         _user32.SetForegroundWindow(h)
         time.sleep(0.01)
-        if h != _user32.GetForegroundWindow():
+        fg2 = _user32.GetForegroundWindow()
+        fg2_i = int(fg2) if fg2 else 0
+        # 与上方早退一致：前台多为顶层，h 可能是同根的弹出子窗，勿误判再刷 SetWindowPos
+        if fg2_i and not _same_root_hwnd(int(hwnd), fg2_i):
             _user32.SetWindowPos(h, wintypes.HWND(_HWND_TOP), 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE)
             time.sleep(0.005)
 
@@ -351,9 +357,10 @@ if sys.platform == "win32":
         if _set_thread_dpi_ctx is not None:
             prev_dpi = _set_thread_dpi_ctx(wintypes.HANDLE(_DPI_AWARE_PER_MONITOR_V2))
         try:
+            focus_hwnd = _get_active_hwnd(src)
             # 4) 可选：置前，全局光标才容易点到目标窗而非背后窗口
-            if bring_foreground:
-                _ensure_foreground_and_topmost(src)
+            if bring_foreground and focus_hwnd > 0:
+                _ensure_foreground_and_topmost(focus_hwnd)
             # 5) 客户区 → 屏幕像素坐标
             pt = _POINT(cx, cy)
             if not _user32.ClientToScreen(wintypes.HWND(src), ctypes.byref(pt)):

@@ -1,29 +1,25 @@
 import { Button, Card, Icon } from 'animal-island-ui'
-import { useCallback, useEffect, useState } from 'react'
-import { getAutoFishStatus, postAutoFishStart, postAutoFishStop } from '../lib/api-client'
+import { useState } from 'react'
+import { useAutoFishStatus } from '../hooks/use-auto-fish-status'
+import { postAutoFishStart, postAutoFishStop } from '../lib/api-client'
 
-export function AutoFishControls() {
-	const [running, setRunning] = useState(false)
-	const [lastPageId, setLastPageId] = useState<string | null>(null)
+const LOGIC_LABEL: Record<string, string> = {
+	fishing: '钓鱼',
+	'sell-fish': '卖鱼',
+	'buy-bait': '买鱼饵',
+	'change-bait': '换鱼饵'
+}
+
+export type AutoFishRemote = ReturnType<typeof useAutoFishStatus>
+
+export function AutoFishControls({ fish }: { fish: AutoFishRemote }) {
+	const { status, err: pollErr, refresh } = fish
+	const running = status?.running ?? false
+	const logicState = status?.logic_state ?? 'fishing'
 	const [busy, setBusy] = useState(false)
 	const [err, setErr] = useState<string | null>(null)
 
-	const refresh = useCallback(async () => {
-		try {
-			const s = await getAutoFishStatus()
-			setRunning(s.running)
-			setLastPageId(s.last_page_id ?? null)
-			setErr(null)
-		} catch (e) {
-			setErr(e instanceof Error ? e.message : String(e))
-		}
-	}, [])
-
-	useEffect(() => {
-		void refresh()
-		const id = window.setInterval(() => void refresh(), 1500)
-		return () => window.clearInterval(id)
-	}, [refresh])
+	const mergedErr = err ?? pollErr
 
 	const onStart = async () => {
 		setBusy(true)
@@ -51,7 +47,7 @@ export function AutoFishControls() {
 		}
 	}
 
-	const statusLine = running ? '运行中' : '已停止'
+	const statusLine = running ? `运行中 · ${LOGIC_LABEL[logicState] ?? logicState}` : '已停止'
 
 	return (
 		<section className='w-full'>
@@ -62,9 +58,9 @@ export function AutoFishControls() {
 
 			<Card color='brown' className='p-2.5'>
 				<div className='flex flex-wrap items-center justify-between gap-2'>
-					<div className='min-w-0 flex-1'>
-						<p className='text-xs font-medium text-[#725d42]'>执行状态</p>
-						<p className='truncate font-mono text-xs leading-snug text-[#4a3d2e]' title={statusLine}>
+					<div className='min-w-0 flex-1 text-white'>
+						<p className='text-xs font-medium'>执行状态</p>
+						<p className='truncate font-mono text-xs leading-snug' title={statusLine}>
 							{statusLine}
 						</p>
 					</div>
@@ -77,7 +73,7 @@ export function AutoFishControls() {
 						</Button>
 					</div>
 				</div>
-				{err != null ? <p className='mt-2 text-xs text-[#b54a4a]'>{err}</p> : null}
+				{mergedErr != null ? <p className='mt-2 text-xs text-[#b54a4a]'>{mergedErr}</p> : null}
 			</Card>
 		</section>
 	)

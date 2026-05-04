@@ -43,10 +43,7 @@ export function CaptureRightPanel() {
 			<div className='grid grid-cols-2 gap-3'>
 				<Card color='app-teal' className='p-3'>
 					<p className='text-xs font-medium tracking-wider uppercase opacity-90'>页面识别</p>
-					<p className='mt-1 font-mono text-xs opacity-90'>
-						{summaryMatch && summaryMatch.w > 0 ? `${summaryMatch.x},${summaryMatch.y},${summaryMatch.w},${summaryMatch.h}` : '—'}
-					</p>
-					<p className='mt-1 font-mono text-xs opacity-90'>相似度：{summaryMatch?.similarity.toFixed(4)}</p>
+					<p className='mt-1 font-mono text-sm opacity-90'>相似度：{summaryMatch?.similarity.toFixed(4)}</p>
 				</Card>
 				<Card color='app-blue' className='p-3'>
 					<p className='text-xs font-medium tracking-wider uppercase opacity-90'>窗口尺寸</p>

@@ -63,9 +63,12 @@ export function postCaptureMatchThreshold(threshold: number) {
 	})
 }
 
+export type AutoFishLogicState = 'fishing' | 'sell-fish' | 'buy-bait' | 'change-bait'
+
 export type AutoFishStatusResponse = {
 	running: boolean
 	last_page_id: string | null
+	logic_state: AutoFishLogicState
 }
 
 export function getAutoFishStatus() {
@@ -83,6 +86,13 @@ export function postAutoFishStop() {
 	return fetchJson<{ running: boolean }>('/api/auto-fish/stop', {
 		method: 'POST',
 		body: JSON.stringify({})
+	})
+}
+
+export function postAutoFishLogicState(logic_state: AutoFishLogicState) {
+	return fetchJson<AutoFishStatusResponse>('/api/auto-fish/logic', {
+		method: 'POST',
+		body: JSON.stringify({ logic_state })
 	})
 }
 

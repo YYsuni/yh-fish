@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from capture_service import CaptureService
@@ -15,6 +15,19 @@ import tools.exec_msg as exec_msg
 import tools.game_input as game_input
 
 _log = logging.getLogger(__name__)
+
+# 自动逻辑状态（与前端 `AutoFishLogicState` 对齐）
+LOGIC_FISHING = "fishing"
+LOGIC_SELL_FISH = "sell-fish"
+LOGIC_BUY_BAIT = "buy-bait"
+LOGIC_CHANGE_BAIT = "change-bait"
+VALID_LOGIC_STATES: frozenset[str] = frozenset({LOGIC_FISHING, LOGIC_SELL_FISH, LOGIC_BUY_BAIT, LOGIC_CHANGE_BAIT})
+_LOGIC_LABELS: dict[str, str] = {
+    LOGIC_FISHING: "钓鱼",
+    LOGIC_SELL_FISH: "卖鱼",
+    LOGIC_BUY_BAIT: "买鱼饵",
+    LOGIC_CHANGE_BAIT: "换鱼饵",
+}
 
 
 class CooldownGate:
@@ -41,6 +54,8 @@ class TickContext:
     cooldown: CooldownGate
     capture: CaptureService
     page_match_threshold: float
+    logic_state: str = LOGIC_FISHING
+    apply_logic_state: Callable[[str], None] | None = field(default=None)
 
 
 def _click_page_match(
@@ -117,6 +132,13 @@ def _page_reeling(ctx: TickContext) -> None:
 
 
 def _page_start_fishing(ctx: TickContext) -> None:
+    if ctx.logic_state == LOGIC_SELL_FISH:
+        if not ctx.cooldown.try_fire("start-fishing:sell-click", 3.0, ctx.monotonic):
+            return
+        cx, cy = 1010, 707
+        exec_msg.msg_out(f"开始钓鱼页面（卖鱼）：左键 ({cx}, {cy})")
+        game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+        return
     _tap_f_cooldown(ctx, "start-fishing", "开始钓鱼页面")
 
 
@@ -125,6 +147,13 @@ def _page_waiting_for_bite(ctx: TickContext) -> None:
 
 
 def _page_fishing_prep(ctx: TickContext) -> None:
+    if ctx.logic_state != LOGIC_FISHING:
+        if ctx.logic_state == LOGIC_BUY_BAIT:
+            return
+        if ctx.apply_logic_state is not None:
+            ctx.apply_logic_state(LOGIC_BUY_BAIT)
+        exec_msg.msg_out("钓鱼准备页面：已进入买鱼饵逻辑")
+        return
     if _click_page_match(ctx, "fishing-prep", "钓鱼准备页面", physical=True):
         time.sleep(1.5)
 
@@ -149,7 +178,21 @@ def _page_fish_escaped(ctx: TickContext) -> None:
 
 
 def _page_no_bait(ctx: TickContext) -> None:
-    _ = ctx
+    """无鱼饵页：在钓鱼逻辑下切换到卖鱼。"""
+    if ctx.logic_state != LOGIC_FISHING:
+        return
+    if ctx.apply_logic_state is not None:
+        ctx.apply_logic_state(LOGIC_SELL_FISH)
+    exec_msg.msg_out("无鱼饵：进入卖鱼逻辑")
+
+
+def _page_change_bait(ctx: TickContext) -> None:
+    """更换鱼饵页：固定坐标左键（与 `pages.json` id `change-bait` 对应）。"""
+    if not ctx.cooldown.try_fire("change-bait:click", 3.0, ctx.monotonic):
+        return
+    cx, cy = 761, 516
+    exec_msg.msg_out(f"更换鱼饵页面：左键 ({cx}, {cy})")
+    game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
 
 
 PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
@@ -162,6 +205,7 @@ PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
     "fish-hooked": _page_fish_hooked,
     "fish-escaped": _page_fish_escaped,
     "no-bait": _page_no_bait,
+    "change-bait": _page_change_bait,
 }
 
 
@@ -175,6 +219,7 @@ class AutoFishExecutor:
         self._thread: threading.Thread | None = None
         self._cooldown = CooldownGate()
         self._last_page_id: str | None = None
+        self._logic_state: str = LOGIC_FISHING
 
     def is_running(self) -> bool:
         t = self._thread
@@ -183,10 +228,27 @@ class AutoFishExecutor:
     def status_dict(self) -> dict[str, object]:
         with self._lock:
             last = self._last_page_id
+            logic = self._logic_state
         return {
             "running": self.is_running(),
             "last_page_id": last,
+            "logic_state": logic,
         }
+
+    def _apply_logic_state(self, logic_state: str) -> None:
+        """仅更新状态（无日志）；供各页面处理函数内调用 `ctx.apply_logic_state(...)` 与手动 API 共用。"""
+        if logic_state not in VALID_LOGIC_STATES:
+            return
+        with self._lock:
+            self._logic_state = logic_state
+
+    def set_logic_state(self, logic_state: str) -> dict[str, object]:
+        if logic_state not in VALID_LOGIC_STATES:
+            raise ValueError(f"无效 logic_state: {logic_state!r}")
+        label = _LOGIC_LABELS.get(logic_state, logic_state)
+        self._apply_logic_state(logic_state)
+        exec_msg.msg_out(f"逻辑切换为：{label}")
+        return self.status_dict()
 
     def start(self) -> dict[str, object]:
         if self.is_running():
@@ -229,6 +291,10 @@ class AutoFishExecutor:
 
             hwnd = s.hwnd
             now = time.monotonic()
+
+            with self._lock:
+                logic_effective = self._logic_state
+
             ctx = TickContext(
                 hwnd=hwnd,
                 page_match=dict(pm),
@@ -236,11 +302,17 @@ class AutoFishExecutor:
                 cooldown=self._cooldown,
                 capture=self._capture,
                 page_match_threshold=float(s.page_match_threshold),
+                logic_state=logic_effective,
+                apply_logic_state=self._apply_logic_state,
             )
-            handler = PAGE_HANDLERS.get(page_id or "", _noop_page)
             try:
-                handler(ctx)
+                if page_id:
+                    PAGE_HANDLERS.get(page_id, _noop_page)(ctx)
             except Exception:
-                _log.exception("auto-fish page handler failed page_id=%s", page_id)
+                _log.exception(
+                    "auto-fish page handler failed page_id=%s logic=%s",
+                    page_id,
+                    logic_effective,
+                )
 
             time.sleep(0.05)
