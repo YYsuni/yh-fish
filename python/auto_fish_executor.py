@@ -129,6 +129,8 @@ def _page_reeling(ctx: TickContext) -> None:
         return
     scale_cx = sx + sw // 2
     dev = abs(scale_cx - mid_x)
+    if dev < 10:
+        return
     hold_max = 0.4
     hold = min(hold_max, hold_max * (dev / 60))
     if scale_cx < mid_x:
@@ -164,6 +166,7 @@ def _page_waiting_for_bite(ctx: TickContext) -> None:
 
 def _page_fishing_prep(ctx: TickContext) -> None:
     """钓鱼准备页面：钓鱼逻辑点击模板匹配区；鱼饵逻辑点击选饵。"""
+
     if ctx.logic_state == LOGIC_FISHING:
         if _click_page_match(ctx, "fishing-prep", "钓鱼准备页面", physical=True):
             time.sleep(1.5)
@@ -175,6 +178,7 @@ def _page_fishing_prep(ctx: TickContext) -> None:
         exec_msg.msg_out(f"钓鱼准备页面：选择鱼饵")
         game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
         return
+    ctx.apply_logic_state(LOGIC_BAIT)
 
 
 def _page_fishing_end(ctx: TickContext) -> None:

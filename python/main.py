@@ -16,6 +16,20 @@ from capture_service import CaptureService
 from server import create_app
 
 
+class WindowChromeApi:
+    """无框窗口顶栏：JS 调最小化 / 关闭。"""
+
+    def minimize_window(self) -> None:
+        for w in webview.windows:
+            w.minimize()
+            return
+
+    def close_window(self) -> None:
+        for w in webview.windows:
+            w.destroy()
+            return
+
+
 def root() -> Path:
     """仓库根目录；冻结构建下为 exe 所在目录（与 `frontend/dist` 同级）。"""
     if getattr(sys, "frozen", False):
@@ -66,7 +80,17 @@ def main(argv: list[str] | None = None) -> None:
     time.sleep(0.35)
 
     url = args.url if args.dev else f"http://{args.host}:{args.port}"
-    webview.create_window("异环钓鱼工具", url, width=960, height=680, min_size=(480, 520), resizable=True)
+    webview.create_window(
+        "异环钓鱼工具",
+        url,
+        width=960,
+        height=680,
+        min_size=(480, 520),
+        resizable=True,
+        frameless=True,
+        easy_drag=False,
+        js_api=WindowChromeApi(),
+    )
 
     try:
         webview.start()
