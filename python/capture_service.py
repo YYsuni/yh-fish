@@ -152,9 +152,9 @@ def _serialize_page_match(result: PageMatchResult | None) -> dict[str, object] |
 class CaptureService:
     """匹配游戏 HWND、驱动 WGC、维护 `_latest` 预览字节与状态。"""
 
-    def __init__(self, *, title_regex: str = DEFAULT_TITLE_REGEX, fps: float = 15.0) -> None:
-        self._title_regex = title_regex
-        self._fps = _clamp_fps(fps)
+    def __init__(self) -> None:
+        self._title_regex = DEFAULT_TITLE_REGEX
+        self._fps = _clamp_fps(25)
         self._lock = threading.Lock()
         self._frame_ready = threading.Condition(self._lock)
         self._latest: bytes = _placeholder_preview()
@@ -169,8 +169,7 @@ class CaptureService:
         self._last_cropped_rgb: Image.Image | None = None
         self._reeling_bar_debug: dict[str, object] | None = None
         self._reeling_bar_triples: (
-            tuple[tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None]
-            | None
+            tuple[tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None] | None
         ) = None
 
         self._wgc = WgcHwndStreamer() if (native_backend_available() and WgcHwndStreamer is not None) else None
@@ -364,8 +363,7 @@ class CaptureService:
         """原子更新最新帧、HWND、逻辑尺寸、页面匹配与管线耗时；并记录实测 FPS 样本。"""
         reeling_debug: dict[str, object] | None = None
         reeling_triples: (
-            tuple[tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None]
-            | None
+            tuple[tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None] | None
         ) = None
         if page_match is not None and page_match.page_id == "reeling" and cropped_rgb is not None:
             try:

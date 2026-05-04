@@ -174,10 +174,16 @@ def match_template_score_in_precrop_roi(
 # 与 `auto_fish_executor._page_reeling` 同一 ROI 与阈值；整窗未裁坐标系 [x, y, w, h]
 REELING_BAR_MATCH_THRESHOLD = 0.8
 REELING_BAR_REGION_PRECROP = (402.72, 94.16, 484.61, 16.58)
-# 刻度：在整窗未裁 y = 溜鱼条 y + h/2 的**单行**上按 RGB 扫 x，颜色约 #FEF7A5；返回框 w=1,h=1 便于 scale_cx。
-REELING_SCALE_COLOR_RGB_LOW = (238, 228, 130)
-REELING_SCALE_COLOR_RGB_HIGH = (255, 255, 220)
-REELING_SCALE_COLOR_MIN_CONF = 0.5
+def _hue_dist_opencv_h(h: np.ndarray, h_ref: float) -> np.ndarray:
+    """OpenCV 8 位 HSV 的 H ∈ [0, 180)，与参考色相的圆周差。"""
+    dh = np.abs(h.astype(np.float64) - float(h_ref))
+    return np.minimum(dh, 180.0 - dh)
+
+
+# 刻度：溜鱼条竖直中心单行上按 HSV 的 H 与参考浅黄 #FEF7A5 圆周距离最小处为 x；返回框 w=1,h=1 便于 scale_cx。
+_REELING_SCALE_REF_H: float = float(
+    cv2.cvtColor(np.uint8([[[254, 247, 165]]]), cv2.COLOR_RGB2HSV)[0, 0, 0]
+)
 _REELING_BAR_EDGE_TEMPLATE_ROWS: tuple[tuple[str, str, str], ...] = (
     ("left", "溜鱼条-左边缘.png", "左边缘"),
     ("right", "溜鱼条-右边缘.png", "右边缘"),
@@ -187,7 +193,7 @@ _REELING_BAR_EDGE_TEMPLATE_ROWS: tuple[tuple[str, str, str], ...] = (
 def _detect_reeling_scale_by_color(
     cropped_rgb: Image.Image,
 ) -> tuple[int, int, int, int, float] | None:
-    """在整窗未裁坐标系溜鱼条竖直中心那一行（映射到裁剪图 y）上，按 RGB 范围在 ROI 水平范围内找刻度 x。"""
+    """在整窗未裁坐标系溜鱼条竖直中心那一行（映射到裁剪图 y）上，在 ROI 内按 HSV 的 H 与参考色圆周距离取最小处为刻度 x。"""
     scene = np.asarray(cropped_rgb.convert("RGB"))
     if scene.ndim != 3 or scene.shape[2] != 3:
         return None
@@ -219,33 +225,21 @@ def _detect_reeling_scale_by_color(
     x1 = min(iw, rx + rw)
     if x1 <= x0:
         return None
-    row = scene[y_row : y_row + 1, x0:x1, :].reshape(-1, 3)
-    lo = np.array(REELING_SCALE_COLOR_RGB_LOW, dtype=np.uint8)
-    hi = np.array(REELING_SCALE_COLOR_RGB_HIGH, dtype=np.uint8)
-    mask = np.all((row >= lo) & (row <= hi), axis=1).astype(np.float64)
-    peak = float(mask.max()) if mask.size else 0.0
-    if peak <= 0.0:
-        return None
-    thr = peak * 0.45
-    xs = np.flatnonzero(mask >= thr)
-    if xs.size == 0:
-        xs = np.array([int(np.argmax(mask))], dtype=np.int64)
-        wts = mask[xs]
-    else:
-        wts = mask[xs]
-    cx_rel = float(np.sum(xs * wts) / np.sum(wts))
-    conf = min(1.0, peak)
-    if conf < float(REELING_SCALE_COLOR_MIN_CONF):
-        return None
-    cx = int(round(x0 + cx_rel))
+    strip = np.ascontiguousarray(scene[y_row : y_row + 1, x0:x1, :], dtype=np.uint8)
+    h_row = cv2.cvtColor(strip, cv2.COLOR_RGB2HSV).reshape(-1, 3)[:, 0]
+    d_h = _hue_dist_opencv_h(h_row, _REELING_SCALE_REF_H)
+    j = int(np.argmin(d_h))
+    d_min = float(d_h[j])
+    conf = float(max(0.0, min(1.0, 1.0 - d_min / 90.0)))
+    cx = int(x0 + j)
     cx = max(x0, min(x1 - 1, cx))
-    return (cx, int(y_row), 1, 1, float(conf))
+    return (cx, int(y_row), 1, 1, conf)
 
 
 def run_reeling_bar_templates(
     cropped_rgb: Image.Image,
 ) -> tuple[dict[str, object], tuple[tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None]]:
-    """正在溜鱼页：在溜鱼条 ROI 内匹配左/右边缘；刻度在条带竖直中心单行上按浅黄 (#FEF7A5) 扫 x。返回 ``(API 可序列化 debug, (左,右,刻度) 三元组)``。"""
+    """正在溜鱼页：在溜鱼条 ROI 内匹配左/右边缘；刻度在条带竖直中心单行上按 HSV 的 H 与浅黄 (#FEF7A5) 参考最接近处为 x。返回 ``(API 可序列化 debug, (左,右,刻度) 三元组)``。"""
     base = _AUTO_FISH_IMG
     t0 = time.perf_counter()
     trips: list[tuple[int, int, int, int, float] | None] = []

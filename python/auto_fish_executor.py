@@ -129,7 +129,7 @@ def _page_reeling(ctx: TickContext) -> None:
     scale_cx = sx + sw // 2
     dev = abs(scale_cx - mid_x)
     hold_max = 0.4
-    hold = min(hold_max, hold_max * (dev / 80))
+    hold = min(hold_max, hold_max * (dev / 60))
     if scale_cx < mid_x:
         exec_msg.msg_out("溜鱼：D")
         game_input.send_key_tap(ctx.hwnd, game_input.VK_D, hold_between_down_up_s=hold)
@@ -339,6 +339,15 @@ def _page_fish_storage(ctx: TickContext) -> None:
     ctx.apply_logic_state(LOGIC_BAIT)
 
 
+def _page_one_click_sell(ctx: TickContext) -> None:
+    """一键出售页面"""
+    if not ctx.cooldown.try_fire("one-click-sell:click", 3.0, ctx.monotonic):
+        return
+    cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, int(747.5), int(516.22))
+    exec_msg.msg_out("一键出售页面：点击确认")
+    game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+
+
 PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
     "reeling": _page_reeling,
     "start-fishing": _page_start_fishing,
@@ -353,6 +362,7 @@ PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
     "shop": _page_shop,
     "market": _page_market,
     "fish-storage": _page_fish_storage,
+    "one-click-sell": _page_one_click_sell,
     "tip": _page_tip,
     "tip-no-fish": _page_tip_no_fish,
     "empty": _page_empty,
