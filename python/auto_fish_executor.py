@@ -223,7 +223,7 @@ def _page_tip(ctx: TickContext) -> None:
     if not ctx.cooldown.try_fire("tip:click", 3.0, ctx.monotonic):
         return
     cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 756, 519)
-    exec_msg.msg_out(f"提示页面：左键 整窗→客户区 ({cx}, {cy})")
+    exec_msg.msg_out(f"提示页面：点击确认")
     game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
     if ctx.apply_logic_state is None:
         return
