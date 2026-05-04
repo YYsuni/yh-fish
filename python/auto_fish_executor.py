@@ -319,9 +319,9 @@ class AutoFishExecutor:
         if self.is_running():
             return {"running": True, "started": False}
         self._stop.clear()
+        exec_msg.msg_out("自动钓鱼启动")
         self._thread = threading.Thread(target=self._loop, name="auto-fish", daemon=True)
         self._thread.start()
-        exec_msg.msg_out("自动钓鱼启动")
         return {"running": True, "started": True}
 
     def stop(self) -> dict[str, object]:

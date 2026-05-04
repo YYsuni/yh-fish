@@ -59,7 +59,9 @@ export function AutoFishControls({ fish }: { fish: AutoFishRemote }) {
 			<Card color='brown' className='p-2.5'>
 				<div className='flex flex-wrap items-center justify-between gap-2'>
 					<div className='min-w-0 flex-1 text-white'>
-						<p className='text-xs font-medium'>执行状态</p>
+						<p className='text-xs font-medium'>
+							执行状态 <span className='text-xs text-white/60'>（F12 停止）</span>
+						</p>
 						<p className='truncate font-mono text-xs leading-snug' title={statusLine}>
 							{statusLine}
 						</p>

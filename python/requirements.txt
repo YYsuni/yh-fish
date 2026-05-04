@@ -6,3 +6,4 @@ Pillow>=11.0
 numpy>=1.26
 opencv-python-headless>=4.10
 windows-capture>=1.0
+pynput>=1.7

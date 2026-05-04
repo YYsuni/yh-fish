@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import struct
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
@@ -17,6 +19,8 @@ from pydantic import BaseModel, Field
 from auto_fish_executor import AutoFishExecutor
 from capture_service import CaptureService
 from tools.exec_msg import snapshot as msg_snapshot
+
+_log = logging.getLogger(__name__)
 
 WS_PREVIEW_HEADER = struct.Struct('>fI')  # 实测 FPS + UTF-8 JSON meta（page_match、crop 尺寸）字节长度
 
@@ -52,7 +56,18 @@ def create_app(
     async def lifespan(_app: FastAPI):
         """进程生命周期内启动/停止捕获后台线程。"""
         capture.start_background()
+        f12_done = threading.Event()
+
+        def _f12() -> None:
+            from pynput import keyboard
+            with keyboard.Listener(on_press=lambda k: auto_fish.stop() if k == keyboard.Key.f12 else None):
+                f12_done.wait()
+
+        f12_t = threading.Thread(target=_f12, name="f12-stop", daemon=True)
+        f12_t.start()
         yield
+        f12_done.set()
+        f12_t.join(timeout=2.0)
         auto_fish.stop()
         capture.stop_background()
 
