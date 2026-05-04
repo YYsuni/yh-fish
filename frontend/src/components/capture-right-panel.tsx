@@ -10,7 +10,7 @@ export function CaptureRightPanel() {
 	const showReelingMeta = pageId === 'reeling' && reelingBarDebug != null
 
 	return (
-		<div className='flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto'>
+		<div className='flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto'>
 			<div className='flex items-center gap-2'>
 				<Icon name='icon-camera' size={26} bounce />
 				<span className='font-medium'>窗口捕获预览</span>
@@ -40,7 +40,7 @@ export function CaptureRightPanel() {
 				</Card>
 			)}
 
-			<div className='grid max-w-md grid-cols-2 gap-3'>
+			<div className='grid grid-cols-2 gap-3'>
 				<Card color='app-teal' className='p-3'>
 					<p className='text-xs font-medium tracking-wider uppercase opacity-90'>页面识别</p>
 					<p className='mt-1 font-mono text-xs opacity-90'>
@@ -54,7 +54,7 @@ export function CaptureRightPanel() {
 				</Card>
 			</div>
 
-			{showReelingMeta && reelingBarDebug != null && (
+			{/* {showReelingMeta && reelingBarDebug != null && (
 				<Card color='app-teal' className='max-w-md p-3'>
 					<p className='text-xs font-medium tracking-wider uppercase opacity-90'>溜鱼子模板匹配</p>
 					<p className='mt-1 font-mono text-xs opacity-90'>匹配时间：{reelingBarDebug.match_ms.toFixed(2)} ms</p>
@@ -65,7 +65,7 @@ export function CaptureRightPanel() {
 							.join(' · ')}
 					</p>
 				</Card>
-			)}
+			)} */}
 
 			<Divider type='line-brown' />
 

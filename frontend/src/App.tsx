@@ -9,7 +9,7 @@ function App() {
 		<AppErrorBoundary>
 			<Cursor>
 				<CaptureSessionProvider>
-					<main className='mx-auto grid h-full w-[800px] grid-cols-2 gap-6 p-4'>
+					<main className='mx-auto grid h-full w-[800px] grid-cols-2 gap-6 p-6'>
 						<CaptureLeftPanel />
 						<CaptureRightPanel />
 					</main>
