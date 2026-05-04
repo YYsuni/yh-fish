@@ -22,6 +22,7 @@ from tools.page_template_match import PageMatchResult, PageTemplateMatcher
 if sys.platform == "win32":
     from tools.native_stream import WgcHwndStreamer, native_backend_available
 else:
+
     def native_backend_available() -> bool:
         """非 Windows 无 WGC，后端不可用。"""
         return False
@@ -162,12 +163,9 @@ class CaptureService:
         self._page_match: dict[str, object] | None = None
         self._page_matcher = PageTemplateMatcher()
         self._pipeline_ms: dict[str, float] = empty_pipeline_timings()
+        self._last_cropped_rgb: Image.Image | None = None
 
-        self._wgc = (
-            WgcHwndStreamer()
-            if (native_backend_available() and WgcHwndStreamer is not None)
-            else None
-        )
+        self._wgc = WgcHwndStreamer() if (native_backend_available() and WgcHwndStreamer is not None) else None
 
     def preview_mime(self) -> str:
         """当前预览帧 MIME。"""
@@ -223,13 +221,17 @@ class CaptureService:
             self._frame_ready.wait(timeout=timeout_s)
             return self._latest
 
-    def wait_next_preview_with_live_fps(
-        self, timeout_s: float
-    ) -> tuple[bytes, float, dict[str, object] | None, int, int, dict[str, float]]:
+    def wait_next_preview_with_live_fps(self, timeout_s: float) -> tuple[bytes, float, dict[str, object] | None, int, int, dict[str, float]]:
         """同 `wait_next_frame`，额外返回 FPS、页面匹配、裁剪尺寸与管线耗时。"""
         with self._frame_ready:
             self._frame_ready.wait(timeout=timeout_s)
             return self._snapshot_unlocked()
+
+    def get_last_cropped_rgb_copy(self) -> Image.Image | None:
+        """返回上一帧逻辑裁剪区 RGB 图副本；无有效帧时为 None。与预览 JPEG 同坐标系（客户区去边距后）。"""
+        with self._lock:
+            im = self._last_cropped_rgb
+            return im.copy() if im is not None else None
 
     def get_status(self) -> CaptureStatus:
         """返回 UI/API 需要的窗口与 FPS 摘要。"""
@@ -267,7 +269,7 @@ class CaptureService:
     def _loop(self) -> None:
         """按 FPS 循环：找窗口 → WGC 快照 → 裁切编码 → 写入 `_latest`。"""
         if sys.platform != "win32" or self._wgc is None:
-            self._set_frame(_placeholder_preview(), None, 0, 0, None, empty_pipeline_timings())
+            self._set_frame(_placeholder_preview(), None, 0, 0, None, empty_pipeline_timings(), cropped_rgb=None)
             return
 
         from tools.window_capture import find_game_hwnd, window_title_bar_crop_px
@@ -290,7 +292,7 @@ class CaptureService:
             # 按标题正则找游戏窗口；未找到则占位图 + 释放 WGC 目标。
             if hwnd is None:
                 self._wgc.ensure_hwnd(None, quality=WGC_JPEG_QUALITY, min_interval_ms=min_iv)
-                self._set_frame(_placeholder_preview(), None, 0, 0, None, merge_pipeline_timings(partial))
+                self._set_frame(_placeholder_preview(), None, 0, 0, None, merge_pipeline_timings(partial), cropped_rgb=None)
             else:
                 self._wgc.ensure_hwnd(hwnd, quality=WGC_JPEG_QUALITY, min_interval_ms=min_iv)
                 data, w, h, _ = self._wgc.get_snapshot()
@@ -302,7 +304,7 @@ class CaptureService:
                     partial["decode_ms"] = perf_elapsed_ms(t0)
 
                     if cropped is None:
-                        self._set_frame(_placeholder_preview(), hwnd, 0, 0, None, merge_pipeline_timings(partial))
+                        self._set_frame(_placeholder_preview(), hwnd, 0, 0, None, merge_pipeline_timings(partial), cropped_rgb=None)
                     else:
                         t0 = time.perf_counter()
                         pm = self._page_matcher.match(cropped)
@@ -312,10 +314,10 @@ class CaptureService:
                         out_data, w, h = _encode_cropped_to_preview(cropped)
                         partial["scale_encode_ms"] = perf_elapsed_ms(t0)
 
-                        self._set_frame(out_data, hwnd, w, h, pm, merge_pipeline_timings(partial))
+                        self._set_frame(out_data, hwnd, w, h, pm, merge_pipeline_timings(partial), cropped_rgb=cropped)
                 else:
                     # 本帧抓拍失败（空数据）：仍带上 hwnd，前端可知窗口在但画面不可用。
-                    self._set_frame(_placeholder_preview(), hwnd, 0, 0, None, merge_pipeline_timings(partial))
+                    self._set_frame(_placeholder_preview(), hwnd, 0, 0, None, merge_pipeline_timings(partial), cropped_rgb=None)
 
             # 扣除本轮耗时，剩余时间 sleep，避免跑满 CPU。
             delay = interval - (time.monotonic() - t_iter)
@@ -330,12 +332,15 @@ class CaptureService:
         h: int,
         page_match: PageMatchResult | None,
         pipeline_ms: dict[str, float],
+        *,
+        cropped_rgb: Image.Image | None,
     ) -> None:
         """原子更新最新帧、HWND、逻辑尺寸、页面匹配与管线耗时；并记录实测 FPS 样本。"""
         with self._lock:
             self._latest = raw
             self._hwnd = hwnd
             self._size = (w, h)
+            self._last_cropped_rgb = cropped_rgb
             self._page_match = _serialize_page_match(page_match)
             self._pipeline_ms = dict(pipeline_ms)
             now = time.monotonic()

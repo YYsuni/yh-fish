@@ -103,6 +103,48 @@ def _match_template_in_roi(
     return (rx + mx, ry + my, tw, th, float(max_v))
 
 
+def match_template_in_precrop_roi(
+    cropped_rgb: Image.Image,
+    template_path: Path,
+    region_xywh_precrop: tuple[float, float, float, float],
+    *,
+    threshold: float,
+) -> tuple[int, int, int, int, float] | None:
+    """在「整窗未裁」坐标系的矩形 ROI 内对单张模板做 TM_CCOEFF_NORMED；`cropped_rgb` 须与捕获管线裁剪后坐标系一致。
+
+    与 `pages.json` 中 `region` 相同：先减 `DEFAULT_PRE_CROP_LEFT_PX` / `DEFAULT_PRE_CROP_TOP_PX`。
+    成功返回 ``(x, y, w, h, confidence)``，否则 None。
+    """
+    if not template_path.is_file():
+        return None
+    try:
+        im = Image.open(template_path).convert("RGB")
+        tpl_rgb = np.asarray(im)
+    except OSError:
+        return None
+    if tpl_rgb.ndim != 3 or tpl_rgb.shape[2] != 3:
+        return None
+    try:
+        rect_adj = _apply_pre_crop_offset(
+            list(region_xywh_precrop),
+            left_px=DEFAULT_PRE_CROP_LEFT_PX,
+            top_px=DEFAULT_PRE_CROP_TOP_PX,
+        )
+        region = tuple(int(round(float(v))) for v in rect_adj)
+    except (TypeError, ValueError):
+        return None
+    scene = np.asarray(cropped_rgb.convert("RGB"))
+    if scene.ndim != 3 or scene.shape[2] != 3:
+        return None
+    r = _match_template_in_roi(scene, region, tpl_rgb)
+    if r is None:
+        return None
+    _x, _y, _w, _h, conf = r
+    if conf < float(threshold):
+        return None
+    return r
+
+
 def _eval_page_features(
     feats: list[_FeatureTemplate],
     scene: np.ndarray,

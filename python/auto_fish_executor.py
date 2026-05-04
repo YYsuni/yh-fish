@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 """自动钓鱼执行器：启动后轮询当前页面，按 page_id 调用各页处理函数。
-
-各页具体按键在下方 `PAGE_HANDLERS` 中补充；冷却请用 `TickContext.cooldown`。
 """
 
 from __future__ import annotations
@@ -10,34 +8,16 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from pathlib import Path
+from typing import Callable
 
-if TYPE_CHECKING:
-    from capture_service import CaptureService
+from capture_service import CaptureService
 
 import tools.exec_msg as exec_msg
 import tools.game_input as game_input
+from tools.page_template_match import match_template_in_precrop_roi
 
 _log = logging.getLogger(__name__)
-
-# 各页冷却 key（互不共用；间隔 `SINGLE_ACTION_COOLDOWN_S`）
-_F_REELING_KEY = "reeling:f"
-_F_START_FISHING_KEY = "start-fishing:f"
-_F_WAITING_FOR_BITE_KEY = "waiting-for-bite:f"
-_F_FISHING_END_KEY = "fishing-end:f"
-_F_FISHING_INTERACT_KEY = "fishing-interact:f"
-_F_FISH_HOOKED_KEY = "fish-hooked:f"
-_F_FISH_ESCAPED_KEY = "fish-escaped:f"
-_F_NO_BAIT_KEY = "no-bait:f"
-
-_F_FISHING_PREP_CLICK_KEY = "fishing-prep:click"
-_FISHING_PREP_CLICK_OFFSET_XY = (15, 15)
-FISHING_PREP_AFTER_CLICK_SETTLE_S = 1.5
-_FISHING_PREP_USE_PHYSICAL_CLICK = True
-
-SINGLE_ACTION_COOLDOWN_S = 3.0
-TICK_INTERVAL_S = 0.05
-IDLE_WHEN_NO_WINDOW_S = 0.2
 
 
 class CooldownGate:
@@ -62,6 +42,8 @@ class TickContext:
     page_match: dict[str, object]
     monotonic: float
     cooldown: CooldownGate
+    capture: CaptureService
+    page_match_threshold: float
 
 
 def _click_page_match(
@@ -69,10 +51,10 @@ def _click_page_match(
     cooldown_key: str,
     label: str,
     *,
-    from_topleft: tuple[int, int] | None = None,
     physical: bool = False,
+    cooldown_s: float = 3.0,
 ) -> bool:
-    """按 page_match 的 x,y,w,h 点击。`from_topleft` 为相对匹配左上角的偏移；`None` 为矩形中心。"""
+    """按 page_match 的 x,y,w,h 点击。"""
     pm = ctx.page_match
     try:
         x, y, w, h = (int(pm["x"]), int(pm["y"]), int(pm["w"]), int(pm["h"]))
@@ -80,25 +62,21 @@ def _click_page_match(
         return False
     if w <= 0 or h <= 0:
         return False
-    if not ctx.cooldown.try_fire(cooldown_key, SINGLE_ACTION_COOLDOWN_S, ctx.monotonic):
+    if not ctx.cooldown.try_fire(cooldown_key, cooldown_s, ctx.monotonic):
         return False
-    if from_topleft is not None:
-        dx, dy = (int(from_topleft[0]), int(from_topleft[1]))
-        cx = max(x, min(x + w - 1, x + dx))
-        cy = max(y, min(y + h - 1, y + dy))
-        exec_msg.msg_out(f"{label}：点击匹配区左上+偏移 ({cx}, {cy})")
-    else:
-        cx = x + w // 2
-        cy = y + h // 2
-        exec_msg.msg_out(f"{label}：点击匹配区中心 ({cx}, {cy})")
+
+    cx = x + w // 2
+    cy = y + h // 2
+    exec_msg.msg_out(f"{label}：点击匹配区中心 ({cx}, {cy})")
     if physical:
-        return bool(game_input.send_left_click_physical(ctx.hwnd, cx, cy))
+        return bool(game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2))
+
     return bool(game_input.send_left_click(ctx.hwnd, cx, cy))
 
 
-def _tap_f_cooldown(ctx: TickContext, cooldown_key: str, label: str) -> None:
-    """按 F 一次，受 `cooldown_key` 与 `SINGLE_ACTION_COOLDOWN_S` 限制。"""
-    if not ctx.cooldown.try_fire(cooldown_key, SINGLE_ACTION_COOLDOWN_S, ctx.monotonic):
+def _tap_f_cooldown(ctx: TickContext, cooldown_key: str, label: str, cooldown_s: float = 3.0) -> None:
+    """按 F 一次，受冷却限制。"""
+    if not ctx.cooldown.try_fire(cooldown_key, cooldown_s, ctx.monotonic):
         return
     exec_msg.msg_out(f"{label}：F 键按下")
     game_input.send_key_tap(ctx.hwnd, game_input.VK_F)
@@ -110,58 +88,74 @@ def _noop_page(ctx: TickContext) -> None:
 
 
 def _page_reeling(ctx: TickContext) -> None:
-    """正在溜鱼页面"""
-    _ = ctx
+    """正在溜鱼页面：在溜鱼条 ROI 内匹配左/右边缘与刻度，按刻度相对安全区发 A/D。"""
+    if not ctx.cooldown.try_fire("reeling:bar", 0.2, ctx.monotonic):
+        return
+    cropped = ctx.capture.get_last_cropped_rgb_copy()
+    if cropped is None:
+        return
+    img_dir = Path(__file__).resolve().parent / "images" / "auto_fish"
+    # 与 pages.json 相同，整窗未裁坐标系 [x, y, w, h]
+    reg = (383.74, 94.16, 509.86, 16.58)
+    th = 0.8
+    left = match_template_in_precrop_roi(cropped, img_dir / "溜鱼条-左边缘.png", reg, threshold=th)
+    right = match_template_in_precrop_roi(cropped, img_dir / "溜鱼条-右边缘.png", reg, threshold=th)
+    scale = match_template_in_precrop_roi(cropped, img_dir / "溜鱼条-刻度.png", reg, threshold=th)
+    if left is None or right is None or scale is None:
+        return
+    lx, _ly, lw, _lh, _lc = left
+    rx, _ry, _rw, _rh, _rc = right
+    sx, _sy, sw, _sh, _sc = scale
+    left_inner = lx + lw
+    right_inner = rx
+    if left_inner >= right_inner:
+        return
+    scale_cx = sx + sw // 2
+    hold = 0.2
+    if scale_cx < left_inner:
+        exec_msg.msg_out("溜鱼：刻度偏左，D")
+        game_input.send_key_tap(ctx.hwnd, game_input.VK_D, hold_between_down_up_s=hold)
+    elif scale_cx > right_inner:
+        exec_msg.msg_out("溜鱼：刻度偏右，A")
+        game_input.send_key_tap(ctx.hwnd, game_input.VK_A, hold_between_down_up_s=hold)
 
 
 def _page_start_fishing(ctx: TickContext) -> None:
-    """开始钓鱼页面"""
-    _tap_f_cooldown(ctx, _F_START_FISHING_KEY, "开始钓鱼页面")
+    _tap_f_cooldown(ctx, "start-fishing", "开始钓鱼页面")
 
 
 def _page_waiting_for_bite(ctx: TickContext) -> None:
-    """等待咬钩页面"""
-    _tap_f_cooldown(ctx, _F_WAITING_FOR_BITE_KEY, "等待咬钩页面")
+    _tap_f_cooldown(ctx, "waiting-for-bite", "等待咬钩页面")
 
 
 def _page_fishing_prep(ctx: TickContext) -> None:
-    """钓鱼准备页面"""
-    if _click_page_match(
-        ctx,
-        _F_FISHING_PREP_CLICK_KEY,
-        "钓鱼准备页面",
-        from_topleft=_FISHING_PREP_CLICK_OFFSET_XY,
-        physical=_FISHING_PREP_USE_PHYSICAL_CLICK,
-    ):
-        time.sleep(FISHING_PREP_AFTER_CLICK_SETTLE_S)
+    if _click_page_match(ctx, "fishing-prep", "钓鱼准备页面", physical=True):
+        time.sleep(1.5)
 
 
 def _page_fishing_end(ctx: TickContext) -> None:
-    """钓鱼结束页面"""
-    _ = ctx
+    if not ctx.cooldown.try_fire("fishing-end", 3.0, ctx.monotonic):
+        return
+    exec_msg.msg_out("钓鱼结束页面：ESC 键按下")
+    game_input.send_key_tap(ctx.hwnd, game_input.VK_ESCAPE)
 
 
 def _page_fishing_interact(ctx: TickContext) -> None:
-    """钓鱼交互页面"""
-    _tap_f_cooldown(ctx, _F_FISHING_INTERACT_KEY, "钓鱼交互页面")
+    _tap_f_cooldown(ctx, "fishing-interact", "钓鱼交互页面")
 
 
 def _page_fish_hooked(ctx: TickContext) -> None:
-    """上钩页面"""
-    _tap_f_cooldown(ctx, _F_FISH_HOOKED_KEY, "上钩页面")
+    _tap_f_cooldown(ctx, "fish-hooked", "上钩页面")
 
 
 def _page_fish_escaped(ctx: TickContext) -> None:
-    """鱼儿溜走页面"""
     _ = ctx
 
 
 def _page_no_bait(ctx: TickContext) -> None:
-    """无鱼饵状态"""
     _ = ctx
 
 
-# pages.json 中 `id` → 处理函数（在此为各页补充具体命令）
 PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
     "reeling": _page_reeling,
     "start-fishing": _page_start_fishing,
@@ -231,19 +225,26 @@ class AutoFishExecutor:
                 self._last_page_id = page_id
 
             if not s.ok or s.hwnd is None:
-                time.sleep(IDLE_WHEN_NO_WINDOW_S)
+                time.sleep(0.2)
                 continue
             if not isinstance(pm, dict):
-                time.sleep(TICK_INTERVAL_S)
+                time.sleep(0.05)
                 continue
 
             hwnd = s.hwnd
             now = time.monotonic()
-            ctx = TickContext(hwnd=hwnd, page_match=dict(pm), monotonic=now, cooldown=self._cooldown)
+            ctx = TickContext(
+                hwnd=hwnd,
+                page_match=dict(pm),
+                monotonic=now,
+                cooldown=self._cooldown,
+                capture=self._capture,
+                page_match_threshold=float(s.page_match_threshold),
+            )
             handler = PAGE_HANDLERS.get(page_id or "", _noop_page)
             try:
                 handler(ctx)
             except Exception:
                 _log.exception("auto-fish page handler failed page_id=%s", page_id)
 
-            time.sleep(TICK_INTERVAL_S)
+            time.sleep(0.05)

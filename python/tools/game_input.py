@@ -7,6 +7,9 @@ import sys
 import time
 
 VK_F = 0x46
+VK_A = 0x41
+VK_D = 0x44
+VK_ESCAPE = 0x1B
 
 # 键盘 Post WM_ACTIVATE 后停顿（秒）
 KEYBOARD_ACTIVATE_DELAY_S = 0.01
@@ -239,9 +242,15 @@ if sys.platform == "win32":
         _user32.SendMessageW(wintypes.HWND(target), msg, wintypes.WPARAM(wparam), wintypes.LPARAM(lp))
         return True
 
-    def send_key_tap(hwnd: int, vk: int) -> bool:
+    def send_key_tap(hwnd: int, vk: int, *, hold_between_down_up_s: float = 0.0) -> bool:
+        """KEYDOWN → 可选保持 → KEYUP；`hold_between_down_up_s` 为按下与抬起之间的间隔（秒）。"""
         t = _get_active_hwnd(hwnd)
-        return _post_key(t, vk, key_up=False) and _post_key(t, vk, key_up=True)
+        if not _post_key(t, vk, key_up=False):
+            return False
+        h = max(0.0, float(hold_between_down_up_s))
+        if h > 0:
+            time.sleep(h)
+        return _post_key(t, vk, key_up=True)
 
     def send_key_down(hwnd: int, vk: int) -> bool:
         return _post_key(_get_active_hwnd(hwnd), vk, key_up=False)
@@ -330,46 +339,57 @@ if sys.platform == "win32":
         hover_dwell_s: float | None = None,
         hold_s: float | None = None,
     ) -> bool:
-        """物理路径（Maa SeizeInput）：置前 → ClientToScreen → SetCursorPos → SendInput 左键。"""
+        """物理左键：`SendInput`（与 `send_left_click` 的消息路径不同）。"""
+        # 1) 句柄有效才继续
         src = int(hwnd)
         if src <= 0 or not _user32.IsWindow(wintypes.HWND(src)):
             return False
+        # 2) 客户区整数坐标（相对 hwnd 左上角）
         cx, cy = int(client_x), int(client_y)
+        # 3) 本线程临时 Per-Monitor V2，避免多屏不同 DPI 下 ClientToScreen / 光标偏差
         prev_dpi = None
         if _set_thread_dpi_ctx is not None:
             prev_dpi = _set_thread_dpi_ctx(wintypes.HANDLE(_DPI_AWARE_PER_MONITOR_V2))
         try:
+            # 4) 可选：置前，全局光标才容易点到目标窗而非背后窗口
             if bring_foreground:
                 _ensure_foreground_and_topmost(src)
+            # 5) 客户区 → 屏幕像素坐标
             pt = _POINT(cx, cy)
             if not _user32.ClientToScreen(wintypes.HWND(src), ctypes.byref(pt)):
                 return False
             sx, sy = int(pt.x), int(pt.y)
+            # 6) 把系统光标移到目标点（SendInput 左键不带坐标，依赖当前光标位置）
             if not _user32.SetCursorPos(sx, sy):
                 return False
+            # 7) 可选：到位后多停一会，模拟悬停（<=0 则跳过，见 _hover_skip_and_seconds）
             skip_h, hd = _hover_skip_and_seconds(hover_dwell_s)
             if not skip_h:
                 time.sleep(hd)
+            # 8) 合成一次左键按下
             inp_sz = ctypes.sizeof(_INPUT)
             inp_down = _INPUT()
             inp_down.type = _INPUT_MOUSE
             inp_down.mi.dwFlags = _MOUSEEVENTF_LEFTDOWN
             if _user32.SendInput(1, ctypes.byref(inp_down), inp_sz) != 1:
                 return False
+            # 9) 按下与抬起之间保持，时长由 hold_s 或默认 MOUSE_CLICK_HOLD_S
             hold = MOUSE_CLICK_HOLD_S if hold_s is None else max(0.0, float(hold_s))
             time.sleep(hold)
+            # 10) 合成一次左键抬起
             inp_up = _INPUT()
             inp_up.type = _INPUT_MOUSE
             inp_up.mi.dwFlags = _MOUSEEVENTF_LEFTUP
             return _user32.SendInput(1, ctypes.byref(inp_up), inp_sz) == 1
         finally:
+            # 11) 恢复进入本函数前的 DPI 感知上下文
             if prev_dpi is not None and _set_thread_dpi_ctx is not None:
                 _set_thread_dpi_ctx(prev_dpi)
 
 else:
 
-    def send_key_tap(hwnd: int, vk: int) -> bool:
-        _ = hwnd, vk
+    def send_key_tap(hwnd: int, vk: int, *, hold_between_down_up_s: float = 0.0) -> bool:
+        _ = hwnd, vk, hold_between_down_up_s
         return True
 
     def send_key_down(hwnd: int, vk: int) -> bool:
