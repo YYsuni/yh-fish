@@ -148,6 +148,9 @@ def match_template_in_precrop_roi(
     return r
 
 
+# 渔具商店内「万能鱼饵」模板搜索区；整窗未裁坐标系 [x, y, w, h]（与 `pages.json` region 一致）
+SHOP_UNIVERSAL_BAIT_REGION_PRECROP = (28, 133.99, 424, 328)
+
 # 与 `auto_fish_executor._page_reeling` 同一 ROI 与阈值；整窗未裁坐标系 [x, y, w, h]
 REELING_BAR_MATCH_THRESHOLD = 0.8
 REELING_BAR_REGION_PRECROP = (402.72, 94.16, 484.61, 16.58)

@@ -13,6 +13,11 @@ from capture_service import CaptureService
 
 import tools.exec_msg as exec_msg
 import tools.game_input as game_input
+from tools.page_template_match import (
+    DEFAULT_PAGES_JSON,
+    SHOP_UNIVERSAL_BAIT_REGION_PRECROP,
+    match_template_in_precrop_roi,
+)
 from tools.window_capture import wgc_precrop_xy_to_client
 
 _log = logging.getLogger(__name__)
@@ -201,6 +206,58 @@ def _page_change_bait(ctx: TickContext) -> None:
     game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
 
 
+def _page_tip(ctx: TickContext) -> None:
+    """提示页面：固定坐标关闭；买鱼饵逻辑下关闭后回到钓鱼。"""
+    if not ctx.cooldown.try_fire("tip:click", 3.0, ctx.monotonic):
+        return
+    cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 756, 519)
+    exec_msg.msg_out(f"提示页面：左键 整窗→客户区 ({cx}, {cy})")
+    game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+    if ctx.logic_state == LOGIC_BUY_BAIT and ctx.apply_logic_state is not None:
+        ctx.apply_logic_state(LOGIC_FISHING)
+        exec_msg.msg_out("提示页面：买鱼饵逻辑已完成，切回钓鱼")
+
+
+_UNIVERSAL_BAIT_TEMPLATE = DEFAULT_PAGES_JSON.parent / "万能鱼饵.png"
+
+
+def _page_shop(ctx: TickContext) -> None:
+    """渔具商店：买鱼饵逻辑下按 ESC 关闭；否则在 ROI 内匹配万能鱼饵并点击购买。"""
+    if ctx.logic_state == LOGIC_FISHING:
+        if not ctx.cooldown.try_fire("shop:buy-bait-esc", 3.0, ctx.monotonic):
+            return
+        exec_msg.msg_out("渔具商店（买鱼饵逻辑）：ESC 键按下")
+        game_input.send_key_tap(ctx.hwnd, game_input.VK_ESCAPE)
+        return
+
+    cropped = ctx.capture.get_last_cropped_rgb_copy()
+    if cropped is None:
+        return
+    r = match_template_in_precrop_roi(
+        cropped,
+        _UNIVERSAL_BAIT_TEMPLATE,
+        SHOP_UNIVERSAL_BAIT_REGION_PRECROP,
+        threshold=0.5,
+    )
+    if r is None:
+        return
+    if not ctx.cooldown.try_fire("shop:universal-bait-sequence", 4.0, ctx.monotonic):
+        return
+    x, y, w, h, _conf = r
+    cx = x + w // 2
+    cy = y + h // 2
+    exec_msg.msg_out(f"渔具商店：点击万能鱼饵")
+    game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+    time.sleep(0.5)
+    cx2, cy2 = wgc_precrop_xy_to_client(ctx.hwnd, 1214, 682)
+    exec_msg.msg_out(f"渔具商店：点击最大数量")
+    game_input.send_left_click_physical(ctx.hwnd, cx2, cy2, hover_dwell_s=0.45, hold_s=0.2)
+    time.sleep(0.4)
+    cx3, cy3 = wgc_precrop_xy_to_client(ctx.hwnd, 1026, 736)
+    exec_msg.msg_out(f"渔具商店：点击确认/购买")
+    game_input.send_left_click_physical(ctx.hwnd, cx3, cy3, hover_dwell_s=0.45, hold_s=0.2)
+
+
 PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
     "reeling": _page_reeling,
     "start-fishing": _page_start_fishing,
@@ -212,6 +269,8 @@ PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
     "fish-escaped": _page_fish_escaped,
     "no-bait": _page_no_bait,
     "change-bait": _page_change_bait,
+    "shop": _page_shop,
+    "tip": _page_tip,
 }
 
 

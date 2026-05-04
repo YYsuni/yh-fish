@@ -49,7 +49,9 @@ export function CaptureRightPanel() {
 				</Card>
 				<Card color='app-blue' className='p-3'>
 					<p className='text-xs font-medium tracking-wider uppercase opacity-90'>窗口尺寸</p>
-					<p className='mt-1 font-mono text-sm font-medium'>{capture && capture.width > 0 ? `${capture.width} × ${capture.height}` : '—'}</p>
+					<p className='mt-1 font-mono text-sm font-medium'>
+						{capture && capture?.width === 1280 ? `${capture?.width} × ${capture?.height}` : capture?.width > 0 ? '必须为 1280x720' : '—'}
+					</p>
 				</Card>
 			</div>
 
