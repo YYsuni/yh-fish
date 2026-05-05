@@ -1,4 +1,3 @@
-import { Button } from 'animal-island-ui'
 import { useState } from 'react'
 import { useAutoFishStatus } from '../hooks/use-auto-fish-status'
 import { postAutoFishStart, postAutoFishStop } from '../lib/api-client'

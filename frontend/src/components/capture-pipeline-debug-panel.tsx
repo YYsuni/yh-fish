@@ -1,4 +1,3 @@
-import { Card } from 'animal-island-ui'
 import { useEffect, useRef, useState } from 'react'
 import type { PipelineMsPayload } from '../lib/api-client'
 import { PIPELINE_KEYS, PIPELINE_LABELS } from '../lib/capture-pipeline-debug'
@@ -49,7 +48,7 @@ export function CapturePipelineDebugPanel({ pipelineMs }: CapturePipelineDebugPa
 	const barScaleMs = displayed != null ? Math.max(1, ...PIPELINE_KEYS.map(k => displayed[k] ?? 0)) : 1
 
 	return (
-		<Card color='app-yellow' className='mt-4 p-3'>
+		<div className='mt-4 p-3'>
 			<p className='text-xs font-semibold tracking-wider text-[#725d42] uppercase'>捕获管线耗时（ms）</p>
 			{displayed == null ? (
 				<p className='mt-1 text-xs text-[#725d42]/80'>等待预览帧…</p>
@@ -70,6 +69,6 @@ export function CapturePipelineDebugPanel({ pipelineMs }: CapturePipelineDebugPa
 					})}
 				</ul>
 			)}
-		</Card>
+		</div>
 	)
 }

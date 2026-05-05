@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      animal-island-ui:
-        specifier: ^0.7.5
-        version: 0.7.5(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       react:
         specifier: ^19.2.5
         version: 19.2.5
@@ -56,15 +53,6 @@ packages:
 
   '@emnapi/wasi-threads@1.2.1':
     resolution: {integrity: sha512-uTII7OYF+/Mes/MrcIOYp5yOtSMLBWSIoLPpcgwipoiKbli6k322tcoFsxoIIxPDqW01SQGAgko4EzZi2BNv2w==}
-
-  '@fontsource/noto-sans-sc@5.2.9':
-    resolution: {integrity: sha512-bTUIWGBgJDpwi5qAr+x0/lcgv80IHTB9vl6s2f6EymZEa7qYV99yNRBZuKFT+SYDKVunZrjCEhWtpxqmbXWl5Q==}
-
-  '@fontsource/nunito@5.2.7':
-    resolution: {integrity: sha512-pmtBq0H9ex9nk+RtJYEJOD9pag393iHETnl/PVKleF4i06cd0ttngK5ZCTgYb5eOqR3Xdlrjtev8m7bmgYprew==}
-
-  '@fontsource/zen-maru-gothic@5.2.8':
-    resolution: {integrity: sha512-6RkH33+rgEJy1hkUdDAf+3PyQ7oUjX3vj7cekmfx/bT/9BEPd07FqrjcGBQDe4uWmUebEKuIZep3phDjsnJ6vA==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -313,15 +301,6 @@ packages:
       babel-plugin-react-compiler:
         optional: true
 
-  animal-island-ui@0.7.5:
-    resolution: {integrity: sha512-rs+MRHEVbpTEQVtlcoWMKdn5UdfkwX+3IuVAZtKVG6b6wlFF/+SDMcB5W8OnCjUoR/4tyC2K7qc1YVwJFeKPvg==}
-    peerDependencies:
-      react: '>=17.0.0'
-      react-dom: '>=17.0.0'
-
-  classnames@2.5.1:
-    resolution: {integrity: sha512-saHYOzhIQs6wy2sVxTM6bUDsQO4F50V9RQ22qBpEdCW+I+/Wmke2HOl6lS6dTpdxVhb88/I6+Hs+438c3lfUow==}
-
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
@@ -555,12 +534,6 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
-  '@fontsource/noto-sans-sc@5.2.9': {}
-
-  '@fontsource/nunito@5.2.7': {}
-
-  '@fontsource/zen-maru-gothic@5.2.8': {}
-
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
@@ -731,17 +704,6 @@ snapshots:
     dependencies:
       '@rolldown/pluginutils': 1.0.0-rc.7
       vite: 8.0.10(@types/node@24.12.2)(jiti@2.6.1)
-
-  animal-island-ui@0.7.5(react-dom@19.2.5(react@19.2.5))(react@19.2.5):
-    dependencies:
-      '@fontsource/noto-sans-sc': 5.2.9
-      '@fontsource/nunito': 5.2.7
-      '@fontsource/zen-maru-gothic': 5.2.8
-      classnames: 2.5.1
-      react: 19.2.5
-      react-dom: 19.2.5(react@19.2.5)
-
-  classnames@2.5.1: {}
 
   csstype@3.2.3: {}
 

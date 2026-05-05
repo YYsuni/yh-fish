@@ -1,4 +1,3 @@
-import { Button, Card } from 'animal-island-ui'
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 
 type Props = {
@@ -29,7 +28,7 @@ export class AppErrorBoundary extends Component<Props, State> {
 		if (error) {
 			return (
 				<div className='flex min-h-screen flex-col items-center justify-center gap-4 px-6 py-12 text-center'>
-					<Card color='app-red' className='max-w-lg p-6'>
+					<div className='max-w-lg p-6'>
 						<p className='text-sm font-medium'>页面渲染出错</p>
 						<p className='mt-2 text-xs opacity-95'>{error.message}</p>
 						{import.meta.env.DEV && error.stack && (
@@ -37,10 +36,10 @@ export class AppErrorBoundary extends Component<Props, State> {
 								{error.stack}
 							</pre>
 						)}
-						<Button type='primary' className='mt-4' htmlType='button' onClick={this.handleRetry}>
+						<button type='button' className='mt-4' onClick={this.handleRetry}>
 							重试
-						</Button>
-					</Card>
+						</button>
+					</div>
 				</div>
 			)
 		}
