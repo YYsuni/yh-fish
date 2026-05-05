@@ -76,12 +76,12 @@ export function CaptureLeftPanel({ workspace }: { workspace: WorkspaceTabId }) {
 					/>
 				</div>
 
-				{workspace === 'fish' ? <AutoFishSettings fish={fish} /> : null}
-
 				<div className='flex items-center justify-between'>
 					<span>预览调试</span>
 					<Switch size='small' checked={previewDebug} onChange={setPreviewDebug} />
 				</div>
+
+				{workspace === 'fish' ? <AutoFishSettings fish={fish} /> : null}
 
 				{workspace === 'fish' ? <AutoFishControls fish={fish} /> : <MusicSettings music={music} />}
 			</div>
