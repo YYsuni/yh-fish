@@ -84,7 +84,7 @@ def main(argv: list[str] | None = None) -> None:
         "异环钓鱼工具",
         url,
         width=960,
-        height=680,
+        height=700,
         min_size=(480, 520),
         resizable=True,
         frameless=True,

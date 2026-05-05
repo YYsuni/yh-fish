@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from PIL import Image
 
+from tools.exec_msg import maybe_warn_window_size
 from tools.capture_pipeline_debug import (
     empty_pipeline_timings,
     merge_pipeline_timings,
@@ -385,3 +386,5 @@ class CaptureService:
             while self._live_fps_times and now - self._live_fps_times[0] > LIVE_FPS_WINDOW_S:
                 self._live_fps_times.popleft()
             self._frame_ready.notify_all()
+        if w > 0 and h > 0:
+            maybe_warn_window_size(w, h)

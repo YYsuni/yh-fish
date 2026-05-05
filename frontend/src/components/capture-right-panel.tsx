@@ -1,80 +1,43 @@
-import { Card, Divider, Icon } from 'animal-island-ui'
 import { formatLiveFpsLabel, parsePageMatch, useCaptureSession } from './capture-session-context'
 import { MsgTerminalPanel } from './msg-terminal-panel'
 
 export function CaptureRightPanel() {
-	const { capture, error, preview, canvasRef, matchBoxCss, reelingBarOverlayBoxes } = useCaptureSession()
+	const { capture, error, preview, canvasRef, matchBoxCss, reelingBarOverlayBoxes, previewDebug } = useCaptureSession()
 	const { liveFps, pageMatch } = preview
 	const summaryMatch = pageMatch ?? parsePageMatch(capture?.page_match ?? null)
 	return (
-		<div className='flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto'>
-			<div className='flex items-center gap-2'>
-				<Icon name='icon-camera' size={26} bounce />
-				<span className='font-medium'>窗口捕获预览</span>
-			</div>
+		<div className='card col-span-3'>
+			<h2 className='card-title'>实时预览</h2>
 
-			<div className='relative w-full max-w-md'>
-				<canvas ref={canvasRef} className='block max-h-[420px] w-full rounded-md bg-[#e8e4d4] object-contain' />
-				<div
-					className='pointer-events-none absolute top-2 left-2 z-10 rounded-lg bg-[#8ac68a]/95 px-2.5 py-1 text-xs leading-none font-medium tracking-tight text-white shadow-sm'
-					aria-live='polite'>
-					{formatLiveFpsLabel(liveFps)}
-				</div>
-				{summaryMatch?.page_label && (
-					<div
-						className='pointer-events-none absolute top-3 right-2 z-10 rounded-lg bg-[#fc736d]/95 p-2 px-2.5 py-1 text-xs leading-none font-medium tracking-tight text-white shadow-sm'
-						aria-live='polite'>
-						{summaryMatch?.page_label}
+			<div className='card-content'>
+				<div className='rounded-md bg-[#F1F1F3] p-3 shadow'>
+					<div className='relative'>
+						<canvas ref={canvasRef} className='block w-full rounded-md bg-[#e8e4d4] object-contain' />
+						{previewDebug && (
+							<>
+								<div
+									className='pointer-events-none absolute top-2 left-2 z-10 rounded border-2 border-white/10 bg-black/40 px-2.5 py-1 text-xs leading-none font-medium tracking-tight text-white shadow-sm backdrop-blur-sm'
+									aria-live='polite'>
+									{formatLiveFpsLabel(liveFps)}
+								</div>
+								{summaryMatch?.page_label && (
+									<div
+										className='pointer-events-none absolute top-2 right-2 z-10 rounded border-2 border-white/10 bg-black/40 px-2 py-1 text-xs leading-none font-medium tracking-tight text-white shadow-sm backdrop-blur-sm'
+										aria-live='polite'>
+										{summaryMatch?.page_label} ({summaryMatch?.similarity.toFixed(2)})
+									</div>
+								)}
+								{matchBoxCss && <div className='pointer-events-none absolute z-9 rounded-sm ring-2 ring-[#fc736d]' style={matchBoxCss} aria-hidden />}
+								{reelingBarOverlayBoxes?.map(b => (
+									<div key={b.key} className={`pointer-events-none absolute z-11 rounded-sm ring-2 ring-[#fc736d]`} style={b.style} aria-hidden />
+								))}
+							</>
+						)}
 					</div>
-				)}
-				{matchBoxCss && <div className='pointer-events-none absolute z-9 rounded-sm ring-2 ring-[#fc736d]' style={matchBoxCss} aria-hidden />}
-				{reelingBarOverlayBoxes?.map(b => (
-					<div key={b.key} className={`pointer-events-none absolute z-11 rounded-sm ring-2 ring-[#fc736d]`} style={b.style} aria-hidden />
-				))}
+				</div>
+
+				<MsgTerminalPanel />
 			</div>
-
-			{error != null && error !== '' && (
-				<Card color='app-red' className='p-3'>
-					<p className='text-sm'>{error}</p>
-				</Card>
-			)}
-
-			<div className='grid grid-cols-2 gap-3'>
-				<Card color='app-teal' className='p-3'>
-					<p className='text-xs font-medium tracking-wider uppercase opacity-90'>页面识别</p>
-					<p className='mt-1 font-mono text-sm opacity-90'>相似度：{summaryMatch?.similarity.toFixed(4)}</p>
-				</Card>
-				<Card color='app-blue' className='p-3'>
-					<p className='text-xs font-medium tracking-wider uppercase opacity-90'>窗口尺寸</p>
-					<p className='mt-1 font-mono text-sm font-medium'>
-						{(() => {
-							const w = capture?.width ?? 0
-							const h = capture?.height ?? 0
-							if (!capture) return '—'
-							if (w === 1280) return `${w} × ${h}`
-							if (w > 0) return '必须为 1280x720'
-							return '—'
-						})()}
-					</p>
-				</Card>
-			</div>
-
-			{/* {showReelingMeta && reelingBarDebug != null && (
-				<Card color='app-teal' className='max-w-md p-3'>
-					<p className='text-xs font-medium tracking-wider uppercase opacity-90'>溜鱼子模板匹配</p>
-					<p className='mt-1 font-mono text-xs opacity-90'>匹配时间：{reelingBarDebug.match_ms.toFixed(2)} ms</p>
-					<p className='mt-1 font-mono text-xs opacity-90'>
-						匹配率：
-						{reelingBarDebug.items
-							.map(it => `${it.label} ${it.similarity != null && Number.isFinite(it.similarity) ? it.similarity.toFixed(4) : '—'}`)
-							.join(' · ')}
-					</p>
-				</Card>
-			)} */}
-
-			<Divider type='line-brown' />
-
-			<MsgTerminalPanel />
 		</div>
 	)
 }

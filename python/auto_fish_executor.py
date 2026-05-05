@@ -358,6 +358,15 @@ def _page_one_click_sell(ctx: TickContext) -> None:
     game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
 
 
+def _page_month_card(ctx: TickContext) -> None:
+    """月卡页面：固定坐标点击购买。"""
+    if not ctx.cooldown.try_fire("month-card:click", 3.0, ctx.monotonic):
+        return
+    cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 635, 366)
+    exec_msg.msg_out("月卡页面：点击领取")
+    game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+
+
 PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
     "reeling": _page_reeling,
     "start-fishing": _page_start_fishing,
@@ -376,6 +385,7 @@ PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
     "tip": _page_tip,
     "tip-no-fish": _page_tip_no_fish,
     "empty": _page_empty,
+    "month-card": _page_month_card,
 }
 
 

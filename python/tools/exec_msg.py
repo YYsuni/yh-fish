@@ -36,9 +36,32 @@ def runs_as_elevated() -> bool:
         return False
 
 
-_ADMIN_WARN_TEXT = (
-    "【提示】当前未以管理员身份运行，键鼠模拟等功能可能无效；请关闭后右键「以管理员身份运行」启动本程序。"
-)
+_ADMIN_WARN_TEXT = "【提示】当前未以管理员身份运行，键鼠模拟等功能可能无效；请关闭后右键「以管理员身份运行」启动本程序。"
+
+# 与模板/自动化坐标系一致：游戏客户区（裁标题栏与边距后）逻辑分辨率。
+REQUIRED_CLIENT_WIDTH = 1280
+REQUIRED_CLIENT_HEIGHT = 720
+
+_window_size_warn_lock = threading.Lock()
+_last_window_size_warn_mono = 0.0
+_WINDOW_SIZE_WARN_INTERVAL_S = 3.0
+
+
+def maybe_warn_window_size(cw: int, ch: int) -> None:
+    """裁剪后逻辑尺寸不是 1280×720 时，节流写入 msg 日志（避免每帧刷屏）。"""
+    global _last_window_size_warn_mono
+    if cw <= 0 or ch <= 0:
+        return
+    if cw == REQUIRED_CLIENT_WIDTH and ch == REQUIRED_CLIENT_HEIGHT:
+        return
+    now = time.monotonic()
+    with _window_size_warn_lock:
+        if now - _last_window_size_warn_mono < _WINDOW_SIZE_WARN_INTERVAL_S:
+            return
+        _last_window_size_warn_mono = now
+    msg_out(f"【提示】游戏窗口客户区当前为 {cw}×{ch}，请设为 {REQUIRED_CLIENT_WIDTH}×{REQUIRED_CLIENT_HEIGHT}，" "否则模板匹配与自动化可能异常。")
+
+
 _admin_warn_stop = threading.Event()
 _admin_warn_thread: threading.Thread | None = None
 _admin_warn_start_lock = threading.Lock()

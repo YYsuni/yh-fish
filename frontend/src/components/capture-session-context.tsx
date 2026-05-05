@@ -95,6 +95,8 @@ export type CaptureSessionContextValue = {
 	matchBoxCss: CSSProperties | null
 	reelingBarOverlayBoxes: ReelingBarOverlayBox[] | null
 	applyCaptureSettings: () => Promise<void>
+	previewDebug: boolean
+	setPreviewDebug: Dispatch<SetStateAction<boolean>>
 }
 
 const CaptureSessionContext = createContext<CaptureSessionContextValue | null>(null)
@@ -115,6 +117,7 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 	const [matchBoxCss, setMatchBoxCss] = useState<CSSProperties | null>(null)
 	const [reelingBarOverlayBoxes, setReelingBarOverlayBoxes] = useState<ReelingBarOverlayBox[] | null>(null)
 	const [layoutTick, setLayoutTick] = useState(0)
+	const [previewDebug, setPreviewDebug] = useState(true)
 
 	const { liveFps, pageMatch, cropDims, pipelineMs, reelingBarDebug } = preview
 	const fpsSyncedOnce = useRef(false)
@@ -352,9 +355,25 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 			canvasRef,
 			matchBoxCss,
 			reelingBarOverlayBoxes,
-			applyCaptureSettings
+			applyCaptureSettings,
+			previewDebug,
+			setPreviewDebug
 		}),
-		[capture, error, liveFps, pageMatch, cropDims, pipelineMs, reelingBarDebug, fps, matchTh, matchBoxCss, reelingBarOverlayBoxes, applyCaptureSettings]
+		[
+			capture,
+			error,
+			liveFps,
+			pageMatch,
+			cropDims,
+			pipelineMs,
+			reelingBarDebug,
+			fps,
+			matchTh,
+			matchBoxCss,
+			reelingBarOverlayBoxes,
+			applyCaptureSettings,
+			previewDebug
+		]
 	)
 
 	return <CaptureSessionContext.Provider value={value}>{children}</CaptureSessionContext.Provider>

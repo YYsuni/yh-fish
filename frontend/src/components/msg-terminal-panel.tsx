@@ -54,13 +54,13 @@ export function MsgTerminalPanel() {
 		<section>
 			<pre
 				ref={preRef}
-				className='scrollbar-thin-transparent max-h-40 min-h-28 w-full flex-1 overflow-auto rounded-md bg-[#2c2824] px-2 py-1.5 font-mono text-[11px] leading-relaxed text-[#e8e4d4]'>
+				className='scrollbar-thin-transparent mt-4 h-40 min-h-28 w-full flex-1 overflow-auto rounded-sm bg-[#D9D9D9] px-2 py-1.5 font-mono text-[11px] leading-relaxed text-[#333] shadow-inner'>
 				{lines.length === 0 ? (
 					<span className='text-[#9a9088]'>暂无输出</span>
 				) : (
 					lines.map((row, i) => (
 						<span key={`${row.t}-${i}`} className='block break-all whitespace-pre-wrap'>
-							<span className='text-[#8ac68a]'>{formatLineTime(row.t)}</span> {row.m}
+							<span className='text-[#178917]'>[{formatLineTime(row.t)}]</span> {row.m}
 						</span>
 					))
 				)}
