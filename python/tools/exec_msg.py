@@ -41,18 +41,24 @@ _ADMIN_WARN_TEXT = "【提示】当前未以管理员身份运行，键鼠模拟
 # 与模板/自动化坐标系一致：游戏客户区（裁标题栏与边距后）逻辑分辨率。
 REQUIRED_CLIENT_WIDTH = 1280
 REQUIRED_CLIENT_HEIGHT = 720
+_WINDOW_SIZE_TOLERANCE_PX = 3
 
 _window_size_warn_lock = threading.Lock()
 _last_window_size_warn_mono = 0.0
 _WINDOW_SIZE_WARN_INTERVAL_S = 3.0
 
+_NON_WINDOWS_GAME_HWND_WARN_TEXT = "【提示】当前平台非 Windows，无法按标题匹配游戏窗口 HWND；整窗捕获与相关自动化仅在 Windows 下可用。"
+_non_windows_game_hwnd_warn_lock = threading.Lock()
+_last_non_windows_game_hwnd_warn_mono = 0.0
+_NON_WINDOWS_GAME_HWND_WARN_INTERVAL_S = 5.0
+
 
 def maybe_warn_window_size(cw: int, ch: int) -> None:
-    """裁剪后逻辑尺寸不是 1280×720 时，节流写入 msg 日志（避免每帧刷屏）。"""
+    """裁剪后逻辑尺寸与 1280×720 相差超过容差时，节流写入 msg 日志（避免每帧刷屏）。"""
     global _last_window_size_warn_mono
     if cw <= 0 or ch <= 0:
         return
-    if cw == REQUIRED_CLIENT_WIDTH and ch == REQUIRED_CLIENT_HEIGHT:
+    if abs(cw - REQUIRED_CLIENT_WIDTH) <= _WINDOW_SIZE_TOLERANCE_PX and abs(ch - REQUIRED_CLIENT_HEIGHT) <= _WINDOW_SIZE_TOLERANCE_PX:
         return
     now = time.monotonic()
     with _window_size_warn_lock:
@@ -60,6 +66,17 @@ def maybe_warn_window_size(cw: int, ch: int) -> None:
             return
         _last_window_size_warn_mono = now
     msg_out(f"【提示】游戏窗口客户区当前为 {cw}×{ch}，请设为 {REQUIRED_CLIENT_WIDTH}×{REQUIRED_CLIENT_HEIGHT}，" "否则模板匹配与自动化可能异常。")
+
+
+def maybe_warn_non_windows_game_hwnd() -> None:
+    """非 Windows 下按间隔节流写入 HWND 相关提示（避免刷屏）。"""
+    global _last_non_windows_game_hwnd_warn_mono
+    now = time.monotonic()
+    with _non_windows_game_hwnd_warn_lock:
+        if now - _last_non_windows_game_hwnd_warn_mono < _NON_WINDOWS_GAME_HWND_WARN_INTERVAL_S:
+            return
+        _last_non_windows_game_hwnd_warn_mono = now
+    msg_out(_NON_WINDOWS_GAME_HWND_WARN_TEXT)
 
 
 _admin_warn_stop = threading.Event()

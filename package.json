@@ -1,6 +1,6 @@
 {
 	"name": "yh-fish",
-	"version": "1.1.0",
+	"version": "1.1.4",
 	"appDisplayName": "异环钓鱼",
 	"main": "index.js",
 	"devDependencies": {

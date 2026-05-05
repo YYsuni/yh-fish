@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from PIL import Image
 
-from tools.exec_msg import maybe_warn_window_size
+from tools.exec_msg import maybe_warn_window_size, msg_out
 from tools.capture_pipeline_debug import (
     empty_pipeline_timings,
     merge_pipeline_timings,
@@ -174,6 +174,7 @@ class CaptureService:
         ) = None
 
         self._wgc = WgcHwndStreamer() if (native_backend_available() and WgcHwndStreamer is not None) else None
+        self._once_logged_game_hwnd = False
 
     def preview_mime(self) -> str:
         """当前预览帧 MIME。"""
@@ -199,6 +200,7 @@ class CaptureService:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
+        self._once_logged_game_hwnd = False
         self._thread = threading.Thread(target=self._loop, name="capture", daemon=True)
         self._thread.start()
 
@@ -320,6 +322,11 @@ class CaptureService:
                 self._wgc.ensure_hwnd(None, quality=WGC_JPEG_QUALITY, min_interval_ms=min_iv)
                 self._set_frame(_placeholder_preview(), None, 0, 0, None, merge_pipeline_timings(partial), cropped_rgb=None)
             else:
+                # 首次找到游戏窗口时，写入 exec_msg 日志。
+                if not self._once_logged_game_hwnd:
+                    msg_out(f"hwnd: {hwnd}")
+                    self._once_logged_game_hwnd = True
+
                 self._wgc.ensure_hwnd(hwnd, quality=WGC_JPEG_QUALITY, min_interval_ms=min_iv)
                 data, w, h, _ = self._wgc.get_snapshot()
 

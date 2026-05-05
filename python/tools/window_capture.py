@@ -13,7 +13,10 @@ WGC_SNAPSHOT_MARGIN_BOTTOM_PX = 2
 if sys.platform != "win32":
 
     def find_game_hwnd(title_regex: str) -> int | None:  # noqa: ARG001
-        """非 Windows 无 HWND，始终返回 None。"""
+        """非 Windows 无 HWND，始终返回 None；按冷却间隔写入 exec_msg 日志。"""
+        from tools.exec_msg import maybe_warn_non_windows_game_hwnd
+
+        maybe_warn_non_windows_game_hwnd()
         return None
 
     def window_title_bar_crop_px(hwnd: int) -> int:  # noqa: ARG001
@@ -27,7 +30,11 @@ else:
     user32 = ctypes.windll.user32
     user32.SetProcessDPIAware()
 
+    from tools.exec_msg import msg_out
+
     WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    _dumped_visible_titles_once = False
 
     def _title(hwnd: int) -> str:
         """读取窗口标题文本。"""
@@ -38,14 +45,31 @@ else:
 
     def find_game_hwnd(title_regex: str) -> int | None:
         """枚举顶层可见窗口，返回首个标题匹配正则的 HWND（命中即停止枚举）。"""
+        global _dumped_visible_titles_once
+
         pat = re.compile(title_regex)
         out: list[int] = []
+
+        # 进程内首次调用时会向 exec_msg 打印一轮「可见顶层窗口」的 HWND 与标题，便于对照正则。
+        if not _dumped_visible_titles_once:
+
+            def dump_cb(hwnd: int, _l: int) -> bool:
+                if not user32.IsWindowVisible(hwnd):
+                    return True
+                title = _title(hwnd).strip()
+                if pat.match(title):
+                    msg_out("成功捕获异环窗口ID")
+                return True
+
+            user32.EnumWindows(WNDENUMPROC(dump_cb), 0)
+            _dumped_visible_titles_once = True
 
         def cb(hwnd: int, _l: int) -> bool:
             """`EnumWindows` 回调：取第一个匹配窗口后返回 False 结束枚举。"""
             if not user32.IsWindowVisible(hwnd):
                 return True
-            if pat.match(_title(hwnd).strip()):
+            title = _title(hwnd).strip()
+            if pat.match(title):
                 out.append(hwnd)
                 return False
             return True
