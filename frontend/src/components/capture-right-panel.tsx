@@ -3,7 +3,7 @@ import { MsgTerminalPanel } from './msg-terminal-panel'
 
 export function CaptureRightPanel() {
 	const { capture, error, preview, canvasRef, matchBoxCss, reelingBarOverlayBoxes, previewDebug } = useCaptureSession()
-	const { liveFps, pageMatch } = preview
+	const { liveFps, pageMatch, cropDims } = preview
 	const summaryMatch = pageMatch ?? parsePageMatch(capture?.page_match ?? null)
 	return (
 		<div className='card col-span-3'>
@@ -25,6 +25,13 @@ export function CaptureRightPanel() {
 										className='pointer-events-none absolute top-2 right-2 z-10 rounded border-2 border-white/10 bg-black/40 px-2 py-1 text-xs leading-none font-medium tracking-tight text-white shadow-sm backdrop-blur-sm'
 										aria-live='polite'>
 										{summaryMatch?.page_label} ({summaryMatch?.similarity.toFixed(2)})
+									</div>
+								)}
+								{cropDims && (
+									<div
+										className='pointer-events-none absolute bottom-1 left-2 z-10 text-[10px] leading-none font-medium tracking-tight text-white/40 shadow-sm backdrop-blur-sm'
+										aria-live='polite'>
+										{cropDims?.w}x{cropDims?.h}
 									</div>
 								)}
 								{matchBoxCss && <div className='pointer-events-none absolute z-9 rounded-sm ring-2 ring-[#fc736d]' style={matchBoxCss} aria-hidden />}

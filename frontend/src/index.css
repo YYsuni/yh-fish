@@ -51,6 +51,24 @@ button {
 	.brand-btn {
 		@apply rounded-full border-[2.5px] border-black/60 bg-[#D4D4D4] py-2 font-bold text-black/70 ring-2 ring-white/10 transition-colors hover:bg-[#ccc] disabled:pointer-events-none disabled:opacity-50;
 	}
+
+	.tab {
+		@apply relative bottom-8 h-20 cursor-pointer rounded-xl border-black px-6 pt-2 pb-10 text-center font-bold text-white/60 ring-3 transition-all;
+		background-color: #333333;
+		background-size: 10px 10px;
+		background-position:
+			0 0,
+			5px 5px;
+		box-shadow:
+			0 0 4px 2px rgba(255, 255, 255, 0.2) inset,
+			0 0 10px 0 rgba(0, 0, 0, 0.1);
+	}
+	.tab:hover {
+		@apply bottom-9 text-white/80;
+	}
+	.tab.active {
+		@apply bg-brand bottom-10 text-white;
+	}
 }
 
 /* Thin, low-contrast scrollbar (Firefox + WebKit) */

@@ -35,6 +35,10 @@ else:
     WgcHwndStreamer = None
 
 DEFAULT_TITLE_REGEX = r"^\s*(异环|NTE)\s*$"
+# 与客户区目标分辨率对齐；与快照尺寸的差在阈值内时按比例削边，否则回退固定边距。
+WGC_TARGET_CLIENT_W = 1280
+WGC_TARGET_CLIENT_H = 720
+WGC_SMART_CROP_MAX_DELTA = 10
 # WGC 管线内 JPEG 快照质量；发给前端的预览另编 JPEG（偏速度）。
 WGC_JPEG_QUALITY = 72
 # 预览 JPEG：quality 越低编码越快、体积越小；optimize=False 避免额外扫描。
@@ -101,10 +105,34 @@ def _decode_and_crop_rgb(jpeg: bytes, title_top_px: int) -> Image.Image | None:
         return None
     w, h = img.size
     t = max(0, title_top_px)
-    x0 = WGC_SNAPSHOT_MARGIN_LR_PX
     y0 = t
-    x1 = w - WGC_SNAPSHOT_MARGIN_LR_PX
-    y1 = h - WGC_SNAPSHOT_MARGIN_BOTTOM_PX
+    rem_h = h - t
+    dw = w - WGC_TARGET_CLIENT_W
+    dh = rem_h - WGC_TARGET_CLIENT_H
+    lim = WGC_SMART_CROP_MAX_DELTA
+
+    if abs(dw) > lim or abs(dh) > lim:
+        x0 = WGC_SNAPSHOT_MARGIN_LR_PX
+        x1 = w - WGC_SNAPSHOT_MARGIN_LR_PX
+        y1 = h - WGC_SNAPSHOT_MARGIN_BOTTOM_PX
+    else:
+        # 宽：|Δ|<=1 不削左右；Δ>0 左右对称去掉多余像素；Δ<0 不扩展，保留整宽。
+        if abs(dw) <= 1:
+            x0, x1 = 0, w
+        elif dw > 0:
+            cut_l = dw // 2
+            cut_r = dw - cut_l
+            x0, x1 = cut_l, w - cut_r
+        else:
+            x0, x1 = 0, w
+        # 高（相对标题栏以下区域）：|Δ|<=1 不削底边；Δ>0 从底部去掉多余；Δ<0 保留到底。
+        if abs(dh) <= 1:
+            y1 = h
+        elif dh > 0:
+            y1 = t + WGC_TARGET_CLIENT_H
+        else:
+            y1 = h
+
     if x1 <= x0 or y1 <= y0:
         return None
     return img.crop((x0, y0, x1, y1))
