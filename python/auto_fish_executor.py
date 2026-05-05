@@ -63,6 +63,7 @@ class TickContext:
     logic_state: str = LOGIC_FISHING
     apply_logic_state: Callable[[str], None] | None = field(default=None)
     sell_fish_on_no_bait: bool = True  # True：无鱼饵切卖鱼；False：直接鱼饵
+    fish_lost_inc: Callable[[], int] | None = field(default=None)  # 累计掉鱼次数 +1，返回新总数
 
 
 def _click_page_match(
@@ -182,10 +183,14 @@ def _page_fishing_prep(ctx: TickContext) -> None:
 
 
 def _page_fishing_end(ctx: TickContext) -> None:
-    """钓鱼结束页面：按 ESC 关闭（带冷却）。"""
+    """钓鱼结束页面：按 ESC 关闭（带冷却）；累计掉鱼次数并输出。"""
     if not ctx.cooldown.try_fire("fishing-end", 3.0, ctx.monotonic):
         return
-    exec_msg.msg_out("钓鱼结束页面：ESC 键按下")
+    total = ctx.fish_lost_inc() if ctx.fish_lost_inc else 0
+    if ctx.fish_lost_inc:
+        exec_msg.msg_out(f"钓鱼结束页面：累计掉鱼 {total} 次，ESC 键按下")
+    else:
+        exec_msg.msg_out("钓鱼结束页面：ESC 键按下")
     game_input.send_key_tap(ctx.hwnd, game_input.VK_ESCAPE)
 
 
@@ -401,6 +406,7 @@ class AutoFishExecutor:
         self._last_page_id: str | None = None
         self._logic_state: str = LOGIC_FISHING
         self._sell_fish_on_no_bait: bool = True
+        self._fish_lost_total: int = 0
 
     def is_running(self) -> bool:
         t = self._thread
@@ -411,11 +417,13 @@ class AutoFishExecutor:
             last = self._last_page_id
             logic = self._logic_state
             sell_on_no = self._sell_fish_on_no_bait
+            lost = self._fish_lost_total
         return {
             "running": self.is_running(),
             "last_page_id": last,
             "logic_state": logic,
             "sell_fish_on_no_bait": sell_on_no,
+            "fish_lost_total": lost,
         }
 
     def _apply_logic_state(self, logic_state: str) -> None:
@@ -424,6 +432,11 @@ class AutoFishExecutor:
             return
         with self._lock:
             self._logic_state = logic_state
+
+    def _increment_fish_lost(self) -> int:
+        with self._lock:
+            self._fish_lost_total += 1
+            return self._fish_lost_total
 
     def set_logic_state(self, logic_state: str) -> dict[str, object]:
         if logic_state not in VALID_LOGIC_STATES:
@@ -499,6 +512,7 @@ class AutoFishExecutor:
                 logic_state=logic_effective,
                 apply_logic_state=self._apply_logic_state,
                 sell_fish_on_no_bait=sell_on_no_bait,
+                fish_lost_inc=self._increment_fish_lost,
             )
             try:
                 if page_id:

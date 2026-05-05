@@ -84,6 +84,8 @@ export type AutoFishStatusResponse = {
 	logic_state: AutoFishLogicState
 	/** 无鱼饵时是否走卖鱼；false 时直接切鱼饵逻辑 */
 	sell_fish_on_no_bait: boolean
+	/** 钓鱼结束页（fishing-end）累计触发次数 */
+	fish_lost_total: number
 }
 
 export function getAutoFishStatus() {
