@@ -10,7 +10,12 @@ import time
 
 import numpy as np
 from PIL import Image
-from tools.exec_msg import msg_out, msg_out_throttled
+from tools.exec_msg import (
+    THROTTLE_INTERVAL_WGC_START_FAILED_S,
+    THROTTLE_KEY_WGC_START_FAILED,
+    msg_out,
+    msg_out_throttled,
+)
 
 
 def native_backend_available() -> bool:
@@ -70,7 +75,11 @@ class WgcHwndStreamer:
         except Exception as e:  # noqa: BLE001
             with self._lock:
                 self._err = f"WGC 启动失败：{e}"
-                msg_out_throttled(self._err, key="wgc.start_failed", interval_s=5.0)
+                msg_out_throttled(
+                    self._err,
+                    key=THROTTLE_KEY_WGC_START_FAILED,
+                    interval_s=THROTTLE_INTERVAL_WGC_START_FAILED_S,
+                )
                 self._latest = None
                 self._active_hwnd = None
 
