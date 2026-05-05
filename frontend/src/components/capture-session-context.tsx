@@ -23,6 +23,7 @@ import {
 	postCaptureMatchThreshold
 } from '../lib/api-client'
 import { normalizePipelineMs } from '../lib/capture-pipeline-debug'
+import { parseMusicDrumDebug, type MusicDrumDebug } from '../lib/music-drum-debug'
 import { cropRectToCanvasOverlayCss } from '../lib/preview-canvas-overlay'
 import { parseReelingBarDebug, type ReelingBarDebug } from '../lib/reeling-bar-debug'
 
@@ -68,6 +69,7 @@ type PreviewOverlay = {
 	cropDims: { w: number; h: number } | null
 	pipelineMs: PipelineMsPayload | null
 	reelingBarDebug: ReelingBarDebug | null
+	musicDrumDebug: MusicDrumDebug | null
 }
 
 const initialPreviewOverlay: PreviewOverlay = {
@@ -75,12 +77,25 @@ const initialPreviewOverlay: PreviewOverlay = {
 	pageMatch: null,
 	cropDims: null,
 	pipelineMs: null,
-	reelingBarDebug: null
+	reelingBarDebug: null,
+	musicDrumDebug: null
 }
 
 export type ReelingBarOverlayBox = {
 	key: string
 	style: CSSProperties
+}
+
+export type MusicDrumOverlayBox = {
+	key: string
+	style: CSSProperties
+	label: string
+	similarity: number | null
+}
+
+export type RefreshCaptureOptions = {
+	/** 切换钓鱼/超强音后由后端重置阈值时，同步滑条并重连预览 WebSocket */
+	syncMatchThreshold?: boolean
 }
 
 export type CaptureSessionContextValue = {
@@ -94,7 +109,9 @@ export type CaptureSessionContextValue = {
 	canvasRef: RefObject<HTMLCanvasElement | null>
 	matchBoxCss: CSSProperties | null
 	reelingBarOverlayBoxes: ReelingBarOverlayBox[] | null
+	musicDrumOverlayBoxes: MusicDrumOverlayBox[] | null
 	applyCaptureSettings: () => Promise<void>
+	refreshCapture: (options?: RefreshCaptureOptions) => Promise<void>
 	previewDebug: boolean
 	setPreviewDebug: Dispatch<SetStateAction<boolean>>
 }
@@ -116,16 +133,17 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 	const [preview, setPreview] = useState<PreviewOverlay>(initialPreviewOverlay)
 	const [matchBoxCss, setMatchBoxCss] = useState<CSSProperties | null>(null)
 	const [reelingBarOverlayBoxes, setReelingBarOverlayBoxes] = useState<ReelingBarOverlayBox[] | null>(null)
+	const [musicDrumOverlayBoxes, setMusicDrumOverlayBoxes] = useState<MusicDrumOverlayBox[] | null>(null)
 	const [layoutTick, setLayoutTick] = useState(0)
 	const [previewDebug, setPreviewDebug] = useState(true)
 
-	const { liveFps, pageMatch, cropDims, pipelineMs, reelingBarDebug } = preview
+	const { liveFps, pageMatch, cropDims, pipelineMs, reelingBarDebug, musicDrumDebug } = preview
 	const fpsSyncedOnce = useRef(false)
 	const matchThSyncedOnce = useRef(false)
 	const canvasRef = useRef<HTMLCanvasElement>(null)
 	const previewMimeRef = useRef('image/jpeg')
 
-	const refreshCapture = useCallback(async () => {
+	const refreshCapture = useCallback(async (options?: RefreshCaptureOptions) => {
 		try {
 			const c = await getCaptureStatus()
 			setCapture(c)
@@ -134,17 +152,21 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 				pageMatch: parsePageMatch(c.page_match ?? null),
 				cropDims: c.width > 0 && c.height > 0 ? { w: c.width, h: c.height } : p.cropDims,
 				pipelineMs: c.pipeline_ms != null ? normalizePipelineMs(c.pipeline_ms) : p.pipelineMs,
-				reelingBarDebug: parseReelingBarDebug(c.reeling_bar_debug ?? null)
+				reelingBarDebug: parseReelingBarDebug(c.reeling_bar_debug ?? null),
+				musicDrumDebug: parseMusicDrumDebug(c.music_drum_debug ?? null)
 			}))
 			previewMimeRef.current = c.preview_mime
 			if (!fpsSyncedOnce.current) {
 				setFps(f => ({ ...f, draft: Math.round(c.fps) }))
 				fpsSyncedOnce.current = true
 			}
-			if (!matchThSyncedOnce.current) {
+			if (options?.syncMatchThreshold || !matchThSyncedOnce.current) {
 				const th = Number(c.page_match_threshold)
 				setMatchTh(m => ({ ...m, draft: Number.isFinite(th) ? th : 0.5 }))
 				matchThSyncedOnce.current = true
+			}
+			if (options?.syncMatchThreshold) {
+				setStreamKey(k => k + 1)
 			}
 			setError(null)
 		} catch (e) {
@@ -207,6 +229,33 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 		setReelingBarOverlayBoxes(boxes.length > 0 ? boxes : null)
 	}, [pageMatch?.page_id, reelingBarDebug, layoutTick, cropDims, capture?.width, capture?.height])
 
+	useLayoutEffect(() => {
+		const el = canvasRef.current
+		if (!el || capture?.capture_context !== 'music' || musicDrumDebug == null) {
+			setMusicDrumOverlayBoxes(null)
+			return
+		}
+		const cropW = cropDims?.w ?? capture?.width ?? 0
+		const cropH = cropDims?.h ?? capture?.height ?? 0
+		if (cropW <= 0 || cropH <= 0) {
+			setMusicDrumOverlayBoxes(null)
+			return
+		}
+		const boxes: MusicDrumOverlayBox[] = []
+		for (const item of musicDrumDebug.items) {
+			if (item.w <= 0 || item.h <= 0) continue
+			const style = cropRectToCanvasOverlayCss(el, cropW, cropH, item.x, item.y, item.w, item.h)
+			if (style == null) continue
+			boxes.push({
+				key: item.key,
+				style,
+				label: item.label,
+				similarity: item.similarity
+			})
+		}
+		setMusicDrumOverlayBoxes(boxes.length > 0 ? boxes : null)
+	}, [capture?.capture_context, musicDrumDebug, layoutTick, cropDims, capture?.width, capture?.height])
+
 	useEffect(() => {
 		const canvas = canvasRef.current
 		if (!canvas) return
@@ -237,6 +286,7 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 			let wsCrop: { w: number; h: number } | null = null
 			let metaPipelineMs: PipelineMsPayload | undefined
 			let wsReeling: ReelingBarDebug | null | undefined
+			let wsMusicDrum: MusicDrumDebug | null | undefined
 			if (metaLen > 0) {
 				try {
 					const metaJson = new TextDecoder().decode(buf.slice(WS_PREVIEW_HEADER_BYTES, WS_PREVIEW_HEADER_BYTES + metaLen))
@@ -246,6 +296,7 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 						crop_height?: unknown
 						pipeline_ms?: unknown
 						reeling_bar_debug?: unknown
+						music_drum_debug?: unknown
 					}
 					pm = parsePageMatch(parsed.page_match ?? null)
 					if (parsed.pipeline_ms != null) metaPipelineMs = normalizePipelineMs(parsed.pipeline_ms)
@@ -254,6 +305,9 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 					if ([cw, ch].every(Number.isFinite) && cw > 0 && ch > 0) wsCrop = { w: cw, h: ch }
 					if (parsed.reeling_bar_debug !== undefined) {
 						wsReeling = parseReelingBarDebug(parsed.reeling_bar_debug)
+					}
+					if (parsed.music_drum_debug !== undefined) {
+						wsMusicDrum = parseMusicDrumDebug(parsed.music_drum_debug)
 					}
 				} catch {
 					/* ignore */
@@ -284,7 +338,8 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 						pageMatch: pm,
 						cropDims: wsCrop ?? prev.cropDims,
 						...(metaPipelineMs !== undefined ? { pipelineMs: metaPipelineMs } : {}),
-						...(wsReeling !== undefined ? { reelingBarDebug: wsReeling } : {})
+						...(wsReeling !== undefined ? { reelingBarDebug: wsReeling } : {}),
+						...(wsMusicDrum !== undefined ? { musicDrumDebug: wsMusicDrum } : {})
 					}))
 				}
 			} catch (e) {
@@ -347,7 +402,7 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 		() => ({
 			capture,
 			error,
-			preview: { liveFps, pageMatch, cropDims, pipelineMs, reelingBarDebug },
+			preview: { liveFps, pageMatch, cropDims, pipelineMs, reelingBarDebug, musicDrumDebug },
 			fps,
 			setFps,
 			matchTh,
@@ -355,7 +410,9 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 			canvasRef,
 			matchBoxCss,
 			reelingBarOverlayBoxes,
+			musicDrumOverlayBoxes,
 			applyCaptureSettings,
+			refreshCapture,
 			previewDebug,
 			setPreviewDebug
 		}),
@@ -367,11 +424,14 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 			cropDims,
 			pipelineMs,
 			reelingBarDebug,
+			musicDrumDebug,
 			fps,
 			matchTh,
 			matchBoxCss,
 			reelingBarOverlayBoxes,
+			musicDrumOverlayBoxes,
 			applyCaptureSettings,
+			refreshCapture,
 			previewDebug
 		]
 	)

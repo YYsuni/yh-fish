@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from auto_fish_executor import AutoFishExecutor
 from capture_service import CaptureService
+from music_executor import MusicExecutor
 from tools.exec_msg import snapshot as msg_snapshot, start_admin_warn_loop, stop_admin_warn_loop
 
 _log = logging.getLogger(__name__)
@@ -37,6 +38,12 @@ class SetMatchThresholdBody(BaseModel):
     threshold: float = Field(ge=0, le=1)
 
 
+class SetCaptureContextBody(BaseModel):
+    """POST `/api/capture/context`：切换页面匹配使用的配置（钓鱼 auto_fish/pages.json ↔ 超强音 music/page.json）。"""
+
+    context: Literal["fish", "music"]
+
+
 class SetAutoFishLogicBody(BaseModel):
     """POST `/api/auto-fish/logic`：手动切换自动执行逻辑状态。"""
 
@@ -53,6 +60,7 @@ def create_app(
     *,
     capture: CaptureService,
     auto_fish: AutoFishExecutor,
+    music: MusicExecutor,
     serve_static: bool,
     dist_dir: Path,
 ) -> FastAPI:
@@ -67,7 +75,13 @@ def create_app(
 
         def _f12() -> None:
             from pynput import keyboard
-            with keyboard.Listener(on_press=lambda k: auto_fish.stop() if k == keyboard.Key.f12 else None):
+
+            def on_press(k: object) -> None:
+                if k == keyboard.Key.f12:
+                    auto_fish.stop()
+                    music.stop()
+
+            with keyboard.Listener(on_press=on_press):
                 f12_done.wait()
 
         f12_t = threading.Thread(target=_f12, name="f12-stop", daemon=True)
@@ -77,6 +91,7 @@ def create_app(
         f12_done.set()
         f12_t.join(timeout=2.0)
         auto_fish.stop()
+        music.stop()
         capture.stop_background()
 
     app = FastAPI(title="yh-fish", version="0.1.0", lifespan=lifespan)
@@ -105,10 +120,12 @@ def create_app(
             "height": s.height,
             "fps": s.fps,
             "preview_mime": s.preview_mime,
+            "capture_context": s.capture_context,
             "page_match": s.page_match,
             "page_match_threshold": s.page_match_threshold,
             "pipeline_ms": s.pipeline_ms,
             "reeling_bar_debug": s.reeling_bar_debug,
+            "music_drum_debug": s.music_drum_debug,
         }
 
     @app.post("/api/capture/fps")
@@ -121,6 +138,12 @@ def create_app(
         """设置页面模板匹配的相似度下限（0–1，越大越苛刻）。"""
         return {"page_match_threshold": capture.set_page_match_threshold(body.threshold)}
 
+    @app.post("/api/capture/context")
+    def cap_set_context(body: SetCaptureContextBody) -> dict[str, float | str]:
+        """切换捕获管线使用的页面 JSON（钓鱼 / 超强音），并重置匹配阈值为该模式默认值。"""
+        ctx = capture.set_capture_context(body.context)
+        return {"capture_context": ctx, "page_match_threshold": capture.get_page_match_threshold()}
+
     @app.get("/api/auto-fish/status")
     def auto_fish_status() -> dict[str, object]:
         """自动钓鱼执行器是否在跑、最近一次识别到的 page_id。"""
@@ -129,6 +152,7 @@ def create_app(
     @app.post("/api/auto-fish/start")
     def auto_fish_start() -> dict[str, object]:
         """启动自动钓鱼轮询线程（幂等：已在跑则 `started: false`）。"""
+        music.stop()
         return auto_fish.start()
 
     @app.post("/api/auto-fish/stop")
@@ -145,6 +169,22 @@ def create_app(
     def auto_fish_set_sell_on_no_bait(body: SetAutoFishSellOnNoBaitBody) -> dict[str, object]:
         """无鱼饵时是否进入卖鱼逻辑；关闭则进入鱼饵逻辑。"""
         return auto_fish.set_sell_fish_on_no_bait(body.enabled)
+
+    @app.get("/api/music/status")
+    def music_status() -> dict[str, object]:
+        """超强音执行器是否在跑、当前生效规则数、上次触发的 rule_id。"""
+        return music.status_dict()
+
+    @app.post("/api/music/start")
+    def music_start() -> dict[str, object]:
+        """启动超强音 ROI 匹配线程；会先停止自动钓鱼。"""
+        auto_fish.stop()
+        return music.start()
+
+    @app.post("/api/music/stop")
+    def music_stop() -> dict[str, object]:
+        """停止超强音线程。"""
+        return music.stop()
 
     @app.get("/api/msg/log")
     def msg_log() -> dict[str, Any]:
@@ -163,6 +203,7 @@ def create_app(
             crop_h: int,
             pipeline_ms: dict[str, float],
             reeling_bar_debug: dict[str, object] | None,
+            music_drum_debug: dict[str, object] | None,
         ) -> bytes:
             meta = json.dumps(
                 {
@@ -171,6 +212,7 @@ def create_app(
                     "crop_height": crop_h,
                     "pipeline_ms": pipeline_ms,
                     "reeling_bar_debug": reeling_bar_debug,
+                    "music_drum_debug": music_drum_debug,
                 },
                 ensure_ascii=False,
                 separators=(",", ":"),
@@ -182,7 +224,8 @@ def create_app(
         loop = asyncio.get_running_loop()
         try:
             pix, fps, pm, cw, ch, pipe, rbd = await loop.run_in_executor(None, capture.get_preview_with_live_fps)
-            await ws.send_bytes(pack_preview(pix, fps, pm, cw, ch, pipe, rbd))
+            mdd = await loop.run_in_executor(None, capture.get_music_drum_debug)
+            await ws.send_bytes(pack_preview(pix, fps, pm, cw, ch, pipe, rbd, mdd))
             while True:
                 timeout = capture.mjpeg_sleep_s()
                 pix, fps, pm, cw, ch, pipe, rbd = await loop.run_in_executor(
@@ -190,7 +233,8 @@ def create_app(
                     capture.wait_next_preview_with_live_fps,
                     timeout,
                 )
-                await ws.send_bytes(pack_preview(pix, fps, pm, cw, ch, pipe, rbd))
+                mdd = await loop.run_in_executor(None, capture.get_music_drum_debug)
+                await ws.send_bytes(pack_preview(pix, fps, pm, cw, ch, pipe, rbd, mdd))
         except WebSocketDisconnect:
             pass
 

@@ -10,6 +10,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
+from typing import Literal
 
 from PIL import Image
 
@@ -19,6 +20,8 @@ from tools.capture_pipeline_debug import (
     merge_pipeline_timings,
     perf_elapsed_ms,
 )
+from tools.auto_fish_page_match import AUTO_FISH_PAGES_JSON, MUSIC_PAGES_JSON
+from tools.music_drum_match import compute_music_drum_debug
 from tools.page_template_match import PageMatchResult, PageTemplateMatcher, run_reeling_bar_templates
 from tools.window_capture import WGC_SNAPSHOT_MARGIN_BOTTOM_PX, WGC_SNAPSHOT_MARGIN_LR_PX
 
@@ -48,6 +51,9 @@ PREVIEW_MAX_WIDTH = 800
 FPS_MIN = 1.0
 FPS_MAX = 60.0
 LIVE_FPS_WINDOW_S = 1.0
+# 切换 capture_context 时写入的默认匹配阈值（与前端滑条 reset 对齐）
+FISH_PAGE_MATCH_THRESHOLD_DEFAULT = 0.7
+MUSIC_PAGE_MATCH_THRESHOLD_DEFAULT = 0.4
 
 _placeholder_preview_cache: bytes | None = None
 
@@ -147,6 +153,9 @@ def _encode_cropped_to_preview(cropped: Image.Image) -> tuple[bytes, int, int]:
     return buf.getvalue(), cw, ch
 
 
+CaptureContextId = Literal["fish", "music"]
+
+
 @dataclass
 class CaptureStatus:
     """`/api/capture/status` 返回的结构（内存中的同源模型）。"""
@@ -157,10 +166,12 @@ class CaptureStatus:
     height: int
     fps: float
     preview_mime: str
+    capture_context: CaptureContextId
     page_match: dict[str, object] | None
     page_match_threshold: float
     pipeline_ms: dict[str, float]
     reeling_bar_debug: dict[str, object] | None
+    music_drum_debug: dict[str, object] | None
 
 
 def _serialize_page_match(result: PageMatchResult | None) -> dict[str, object] | None:
@@ -193,13 +204,16 @@ class CaptureService:
         self._size = (0, 0)
         self._live_fps_times: deque[float] = deque()
         self._page_match: dict[str, object] | None = None
-        self._page_matcher = PageTemplateMatcher()
+        self._matcher_auto_fish = PageTemplateMatcher(AUTO_FISH_PAGES_JSON)
+        self._matcher_music = PageTemplateMatcher(MUSIC_PAGES_JSON)
+        self._capture_context: CaptureContextId = "fish"
         self._pipeline_ms: dict[str, float] = empty_pipeline_timings()
         self._last_cropped_rgb: Image.Image | None = None
         self._reeling_bar_debug: dict[str, object] | None = None
         self._reeling_bar_triples: (
             tuple[tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None] | None
         ) = None
+        self._music_drum_debug: dict[str, object] | None = None
 
         self._wgc = WgcHwndStreamer() if (native_backend_available() and WgcHwndStreamer is not None) else None
         self._once_logged_game_hwnd = False
@@ -215,8 +229,31 @@ class CaptureService:
             return self._fps
 
     def set_page_match_threshold(self, threshold: float) -> float:
-        """设置 OpenCV 模板匹配下限（0–1）；"""
-        return self._page_matcher.set_match_threshold(threshold)
+        """设置 OpenCV 模板匹配下限（0–1）；钓鱼与超强音共用同一阈值。"""
+        v = self._matcher_auto_fish.set_match_threshold(threshold)
+        self._matcher_music.set_match_threshold(v)
+        return v
+
+    def get_page_match_threshold(self) -> float:
+        """当前全局匹配阈值（两路 Matcher 同步）。"""
+        return self._matcher_auto_fish.get_match_threshold()
+
+    def get_capture_context(self) -> CaptureContextId:
+        """当前捕获管线使用的页面配置：`fish` 为钓鱼 pages.json，`music` 为超强音 page.json。"""
+        with self._lock:
+            return self._capture_context
+
+    def set_capture_context(self, context: CaptureContextId) -> CaptureContextId:
+        """切换页面匹配数据源，并重置匹配阈值为该模式的默认值（钓鱼 0.7 / 超强音 0.4）。"""
+        with self._lock:
+            self._capture_context = context
+        default_th = (
+            FISH_PAGE_MATCH_THRESHOLD_DEFAULT
+            if context == "fish"
+            else MUSIC_PAGE_MATCH_THRESHOLD_DEFAULT
+        )
+        self.set_page_match_threshold(default_th)
+        return context
 
     def mjpeg_sleep_s(self) -> float:
         """MJPEG / WS 推送侧等待下一帧的最长阻塞时间（秒），与 FPS 一致。"""
@@ -291,11 +328,18 @@ class CaptureService:
                 height=h,
                 fps=self._fps,
                 preview_mime=current_preview_mime(),
+                capture_context=self._capture_context,
                 page_match=self._page_match,
-                page_match_threshold=self._page_matcher.get_match_threshold(),
+                page_match_threshold=self._matcher_auto_fish.get_match_threshold(),
                 pipeline_ms=dict(self._pipeline_ms),
                 reeling_bar_debug=self._reeling_bar_debug,
+                music_drum_debug=self._music_drum_debug,
             )
+
+    def get_music_drum_debug(self) -> dict[str, object] | None:
+        """超强音模式下四槽鼓点匹配的调试框（与预览 WebSocket meta 同源）。"""
+        with self._lock:
+            return self._music_drum_debug
 
     def _live_fps_unlocked(self) -> float:
         """在已持有 `_lock` 下，根据 `_live_fps_times` 估算近期 FPS。"""
@@ -368,7 +412,10 @@ class CaptureService:
                         self._set_frame(_placeholder_preview(), hwnd, 0, 0, None, merge_pipeline_timings(partial), cropped_rgb=None)
                     else:
                         t0 = time.perf_counter()
-                        pm = self._page_matcher.match(cropped)
+                        with self._lock:
+                            ctx = self._capture_context
+                        matcher = self._matcher_auto_fish if ctx == "fish" else self._matcher_music
+                        pm = matcher.match(cropped)
                         partial["template_match_ms"] = perf_elapsed_ms(t0)
 
                         t0 = time.perf_counter()
@@ -397,15 +444,29 @@ class CaptureService:
         cropped_rgb: Image.Image | None,
     ) -> None:
         """原子更新最新帧、HWND、逻辑尺寸、页面匹配与管线耗时；并记录实测 FPS 样本。"""
+        with self._lock:
+            cap_ctx = self._capture_context
         reeling_debug: dict[str, object] | None = None
         reeling_triples: (
             tuple[tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None, tuple[int, int, int, int, float] | None] | None
         ) = None
-        if page_match is not None and page_match.page_id == "reeling" and cropped_rgb is not None:
+        if (
+            cap_ctx == "fish"
+            and page_match is not None
+            and page_match.page_id == "reeling"
+            and cropped_rgb is not None
+        ):
             try:
                 reeling_debug, reeling_triples = run_reeling_bar_templates(cropped_rgb)
             except Exception:
                 _log.exception("reeling bar template match failed")
+
+        music_drum_debug: dict[str, object] | None = None
+        if cap_ctx == "music" and cropped_rgb is not None:
+            try:
+                music_drum_debug = compute_music_drum_debug(cropped_rgb)
+            except Exception:
+                _log.exception("music drum region match failed")
 
         with self._lock:
             self._latest = raw
@@ -415,6 +476,7 @@ class CaptureService:
             self._page_match = _serialize_page_match(page_match)
             self._reeling_bar_debug = reeling_debug
             self._reeling_bar_triples = reeling_triples
+            self._music_drum_debug = music_drum_debug
             self._pipeline_ms = dict(pipeline_ms)
             now = time.monotonic()
             self._live_fps_times.append(now)

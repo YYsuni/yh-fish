@@ -11,6 +11,8 @@ export type PageMatchPayload = {
 /** 与后端 `capture_pipeline_debug.PIPELINE_TIMING_KEYS` 对齐的毫秒耗时（缺省键按 0） */
 export type PipelineMsPayload = Record<string, number>
 
+export type CaptureContextId = 'fish' | 'music'
+
 export type CaptureStatusResponse = {
 	ok: boolean
 	hwnd: number | null
@@ -18,11 +20,15 @@ export type CaptureStatusResponse = {
 	height: number
 	fps: number
 	preview_mime: string
+	/** 后端页面模板数据源：钓鱼 pages.json / 超强音 music/page.json */
+	capture_context: CaptureContextId
 	page_match: PageMatchPayload
 	page_match_threshold: number
 	pipeline_ms?: PipelineMsPayload
 	/** 正在溜鱼页时由后端填充：子模板匹配耗时与各项相似度/矩形 */
 	reeling_bar_debug?: unknown
+	/** 超强音模式：四槽鼓点 ROI 匹配框与相似度 */
+	music_drum_debug?: unknown
 }
 
 export function getCaptureWsUrl(): string {
@@ -60,6 +66,13 @@ export function postCaptureMatchThreshold(threshold: number) {
 	return fetchJson<{ page_match_threshold: number }>('/api/capture/match-threshold', {
 		method: 'POST',
 		body: JSON.stringify({ threshold })
+	})
+}
+
+export function postCaptureContext(context: CaptureContextId) {
+	return fetchJson<{ capture_context: CaptureContextId; page_match_threshold: number }>('/api/capture/context', {
+		method: 'POST',
+		body: JSON.stringify({ context })
 	})
 }
 
@@ -102,6 +115,29 @@ export function postAutoFishSellOnNoBait(enabled: boolean) {
 	return fetchJson<AutoFishStatusResponse>('/api/auto-fish/sell-on-no-bait', {
 		method: 'POST',
 		body: JSON.stringify({ enabled })
+	})
+}
+
+export type MusicStatusResponse = {
+	running: boolean
+	last_page_id: string | null
+}
+
+export function getMusicStatus() {
+	return fetchJson<MusicStatusResponse>('/api/music/status')
+}
+
+export function postMusicStart() {
+	return fetchJson<{ running: boolean; started: boolean }>('/api/music/start', {
+		method: 'POST',
+		body: JSON.stringify({})
+	})
+}
+
+export function postMusicStop() {
+	return fetchJson<{ running: boolean }>('/api/music/stop', {
+		method: 'POST',
+		body: JSON.stringify({})
 	})
 }
 

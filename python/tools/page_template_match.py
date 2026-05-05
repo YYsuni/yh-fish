@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""根据 `images/auto_fish/pages.json` 与模板 PNG，对裁剪后的游戏画面做 OpenCV 模板匹配。"""
+"""按任意 `pages.json` / `page.json`（见构造参数）与模板 PNG，对裁剪后的游戏画面做 OpenCV 模板匹配。"""
 
 from __future__ import annotations
 

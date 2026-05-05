@@ -460,6 +460,11 @@ class AutoFishExecutor:
 
     def _loop(self) -> None:
         while not self._stop.is_set():
+            if self._capture.get_capture_context() != "fish":
+                with self._lock:
+                    self._last_page_id = None
+                time.sleep(0.05)
+                continue
             s = self._capture.get_status()
             pm = s.page_match
             page_id: str | None = None

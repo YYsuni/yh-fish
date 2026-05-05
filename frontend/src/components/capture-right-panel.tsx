@@ -2,7 +2,7 @@ import { formatLiveFpsLabel, parsePageMatch, useCaptureSession } from './capture
 import { MsgTerminalPanel } from './msg-terminal-panel'
 
 export function CaptureRightPanel() {
-	const { capture, error, preview, canvasRef, matchBoxCss, reelingBarOverlayBoxes, previewDebug } = useCaptureSession()
+	const { capture, error, preview, canvasRef, matchBoxCss, reelingBarOverlayBoxes, musicDrumOverlayBoxes, previewDebug } = useCaptureSession()
 	const { liveFps, pageMatch, cropDims } = preview
 	const summaryMatch = pageMatch ?? parsePageMatch(capture?.page_match ?? null)
 	return (
@@ -37,6 +37,13 @@ export function CaptureRightPanel() {
 								{matchBoxCss && <div className='pointer-events-none absolute z-9 rounded-sm ring-2 ring-[#fc736d]' style={matchBoxCss} aria-hidden />}
 								{reelingBarOverlayBoxes?.map(b => (
 									<div key={b.key} className={`pointer-events-none absolute z-11 rounded-sm ring-2 ring-[#fc736d]`} style={b.style} aria-hidden />
+								))}
+								{musicDrumOverlayBoxes?.map(b => (
+									<div key={b.key} className='pointer-events-none absolute z-12' style={b.style} aria-hidden>
+										<span className='absolute bottom-0.5 left-0.5 rounded bg-black/55 px-1 text-[10px] leading-none font-medium text-white'>
+											{b.similarity != null ? b.similarity.toFixed(2) : '—'}
+										</span>
+									</div>
 								))}
 							</>
 						)}

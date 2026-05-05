@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useAutoFishStatus } from '../hooks/use-auto-fish-status'
-import { postAutoFishStart, postAutoFishStop } from '../lib/api-client'
+import { useAutoFishStatus } from '../../hooks/use-auto-fish-status'
+import { postAutoFishStart, postAutoFishStop } from '../../lib/api-client'
 
 const LOGIC_LABEL: Record<string, string> = {
 	fishing: '钓鱼',
@@ -11,22 +11,18 @@ const LOGIC_LABEL: Record<string, string> = {
 export type AutoFishRemote = ReturnType<typeof useAutoFishStatus>
 
 export function AutoFishControls({ fish }: { fish: AutoFishRemote }) {
-	const { status, err: pollErr, refresh } = fish
+	const { status, refresh } = fish
 	const running = status?.running ?? false
 	const logicState = status?.logic_state ?? 'fishing'
 	const [busy, setBusy] = useState(false)
-	const [err, setErr] = useState<string | null>(null)
-
-	const mergedErr = err ?? pollErr
 
 	const onStart = async () => {
 		setBusy(true)
-		setErr(null)
 		try {
 			await postAutoFishStart()
 			await refresh()
 		} catch (e) {
-			setErr(e instanceof Error ? e.message : String(e))
+			console.error(e)
 		} finally {
 			setBusy(false)
 		}
@@ -34,12 +30,11 @@ export function AutoFishControls({ fish }: { fish: AutoFishRemote }) {
 
 	const onStop = async () => {
 		setBusy(true)
-		setErr(null)
 		try {
 			await postAutoFishStop()
 			await refresh()
 		} catch (e) {
-			setErr(e instanceof Error ? e.message : String(e))
+			console.error(e)
 		} finally {
 			setBusy(false)
 		}

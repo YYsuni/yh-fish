@@ -1,20 +1,17 @@
 import { RangeSlider } from './ui/range-slider'
 import { Switch } from './ui/switch'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useAutoFishStatus } from '../hooks/use-auto-fish-status'
-import { postAutoFishLogicState, postAutoFishSellOnNoBait, type AutoFishLogicState } from '../lib/api-client'
-import { AutoFishControls } from './auto-fish-controls'
+import { useMusicStatus } from '../hooks/use-music-status'
+import { AutoFishControls } from './auto-fish/auto-fish-controls'
+import { AutoFishSettings } from './auto-fish/auto-fish-settings'
+import { MusicSettings } from './music/music-settings'
 import { FPS_MAX, FPS_MIN, MATCH_TH_MAX, MATCH_TH_MIN, useCaptureSession } from './capture-session-context'
+import type { WorkspaceTabId } from './workspace-types'
 
 const CAPTURE_SETTINGS_DEBOUNCE_MS = 400
 
-const LOGIC_OPTIONS: { id: AutoFishLogicState; label: string }[] = [
-	{ id: 'fishing', label: '钓鱼' },
-	{ id: 'sell-fish', label: '卖鱼' },
-	{ id: 'bait', label: '鱼饵' }
-]
-
-export function CaptureLeftPanel() {
+export function CaptureLeftPanel({ workspace }: { workspace: WorkspaceTabId }) {
 	const { fps, setFps, matchTh, setMatchTh, applyCaptureSettings, previewDebug, setPreviewDebug } = useCaptureSession()
 	const applyCaptureSettingsRef = useRef(applyCaptureSettings)
 	applyCaptureSettingsRef.current = applyCaptureSettings
@@ -34,23 +31,7 @@ export function CaptureLeftPanel() {
 	}, [])
 
 	const fish = useAutoFishStatus()
-	const [logicBusy, setLogicBusy] = useState(false)
-	const [sellOnNoBaitBusy, setSellOnNoBaitBusy] = useState(false)
-	const activeLogic = fish.status?.logic_state ?? 'fishing'
-	const sellFishOnNoBait = fish.status?.sell_fish_on_no_bait ?? true
-
-	const onPickLogic = async (id: AutoFishLogicState) => {
-		if (id === activeLogic || logicBusy) return
-		setLogicBusy(true)
-		try {
-			await postAutoFishLogicState(id)
-			await fish.refresh()
-		} catch (e) {
-			console.error(e)
-		} finally {
-			setLogicBusy(false)
-		}
-	}
+	const music = useMusicStatus()
 
 	return (
 		<aside className='card col-span-2 flex flex-col'>
@@ -95,49 +76,14 @@ export function CaptureLeftPanel() {
 					/>
 				</div>
 
-				<div className='flex items-center justify-between'>
-					<span>是否卖鱼</span>
-					<Switch
-						size='small'
-						checked={sellFishOnNoBait}
-						loading={sellOnNoBaitBusy}
-						disabled={sellOnNoBaitBusy}
-						onChange={async v => {
-							setSellOnNoBaitBusy(true)
-							try {
-								await postAutoFishSellOnNoBait(v)
-								await fish.refresh()
-							} catch (e) {
-								console.error(e)
-							} finally {
-								setSellOnNoBaitBusy(false)
-							}
-						}}
-					/>
-				</div>
-
-				<p className='flex items-start gap-1 text-[10px]'>
-					<svg
-						className='mt-px size-3 shrink-0 text-[#725d42]/90'
-						viewBox='0 0 24 24'
-						fill='none'
-						stroke='currentColor'
-						strokeWidth='2'
-						strokeLinecap='round'
-						strokeLinejoin='round'
-						aria-hidden>
-						<circle cx='12' cy='12' r='10' />
-						<path d='M12 8v4M12 16h.01' />
-					</svg>
-					<span>{`钓鱼 -> (无鱼饵) -> ${sellFishOnNoBait ? '一键卖鱼 -> ' : ''}鱼饵 -> 钓鱼`}</span>
-				</p>
+				{workspace === 'fish' ? <AutoFishSettings fish={fish} /> : null}
 
 				<div className='flex items-center justify-between'>
 					<span>预览调试</span>
 					<Switch size='small' checked={previewDebug} onChange={setPreviewDebug} />
 				</div>
 
-				<AutoFishControls fish={fish} />
+				{workspace === 'fish' ? <AutoFishControls fish={fish} /> : <MusicSettings music={music} />}
 			</div>
 		</aside>
 	)

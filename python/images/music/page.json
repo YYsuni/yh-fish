@@ -1,0 +1,15 @@
+{
+	"page_priority": ["敲鼓页面"],
+	"pages": [
+		{
+			"id": "drum",
+			"label": "敲鼓页面",
+			"features": [
+				{
+					"file": "鼓.png",
+					"region": [479.24, 689.9, 58.2, 61.73]
+				}
+			]
+		}
+	]
+}
