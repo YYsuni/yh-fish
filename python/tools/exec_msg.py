@@ -13,10 +13,24 @@ _MAX = 400
 _lines: deque[tuple[float, str]] = deque(maxlen=_MAX)
 _lock = threading.Lock()
 
+_msg_out_throttle_lock = threading.Lock()
+_msg_out_throttle_last_mono: dict[str, float] = {}
+
 
 def msg_out(text: str) -> None:
     with _lock:
         _lines.append((time.time(), text))
+
+
+def msg_out_throttled(text: str, *, key: str, interval_s: float = 5.0) -> None:
+    """同一 key 在 interval_s 内最多写入一条日志，避免高频路径刷屏。"""
+    now = time.monotonic()
+    with _msg_out_throttle_lock:
+        last = _msg_out_throttle_last_mono.get(key, 0.0)
+        if now - last < interval_s:
+            return
+        _msg_out_throttle_last_mono[key] = now
+    msg_out(text)
 
 
 def snapshot() -> list[dict[str, Any]]:

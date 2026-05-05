@@ -10,7 +10,7 @@ import time
 
 import numpy as np
 from PIL import Image
-from tools.exec_msg import msg_out
+from tools.exec_msg import msg_out, msg_out_throttled
 
 
 def native_backend_available() -> bool:
@@ -70,7 +70,7 @@ class WgcHwndStreamer:
         except Exception as e:  # noqa: BLE001
             with self._lock:
                 self._err = f"WGC 启动失败：{e}"
-                msg_out(self._err)
+                msg_out_throttled(self._err, key="wgc.start_failed", interval_s=5.0)
                 self._latest = None
                 self._active_hwnd = None
 
@@ -92,7 +92,8 @@ class WgcHwndStreamer:
         """为指定 HWND 启动自由线程捕获，在帧回调里节流编码 JPEG。"""
         from windows_capture import WindowsCapture
 
-        cap = WindowsCapture(window_hwnd=hwnd, cursor_capture=False, draw_border=False)
+        # draw_border 勿传 False：原生层会调用 IsBorderRequired，部分系统报「不支持切换捕获边框」。
+        cap = WindowsCapture(window_hwnd=hwnd, cursor_capture=False)
         last_encode = [0.0]
         first_frame_logged = [False]
 
