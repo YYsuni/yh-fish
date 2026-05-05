@@ -101,43 +101,55 @@ class WgcHwndStreamer:
         """为指定 HWND 启动自由线程捕获，在帧回调里节流编码 JPEG。"""
         from windows_capture import WindowsCapture
 
-        # draw_border 勿传 False：原生层会调用 IsBorderRequired，部分系统报「不支持切换捕获边框」。
-        cap = WindowsCapture(window_hwnd=hwnd, cursor_capture=False)
         last_encode = [0.0]
         first_frame_logged = [False]
 
-        @cap.event
-        def on_closed() -> None:
-            """捕获会话关闭（占位，无需处理）。"""
-            msg_out(f"WGC 捕获会话关闭 hwnd: {hwnd}")
-            return
-
-        @cap.event
-        def on_frame_arrived(frame, _internal_capture_control):  # noqa: F841
-            """新帧到达：按最小间隔将 BGRA 缓冲转为 JPEG 写入 `_latest`。"""
-            if not first_frame_logged[0]:
-                msg_out(f"捕获第一帧成功 hwnd: {hwnd}")
-                first_frame_logged[0] = True
-            now = time.monotonic()
-            if (now - last_encode[0]) * 1000.0 < min_interval_ms:
-                return
-            last_encode[0] = now
+        # WGC 默认会在被捕获窗口周围画黄色隐私提示边（系统提示「正在被采集」）。
+        # `draw_border=False` 对应关闭边框；原生层会调用 IsBorderRequired，
+        # 部分环境报「不支持切换捕获边框」，此时回退为不传 draw_border（默认），仍可能有黄框。
+        for border_off in (True, False):
             try:
-                h, w, _ = frame.frame_buffer.shape
-                raw = np.ascontiguousarray(frame.frame_buffer).tobytes()
-                img = Image.frombytes("RGBA", (w, h), raw, "raw", "BGRA").convert("RGB")
-                bio = io.BytesIO()
-                img.save(bio, format="JPEG", quality=quality, optimize=False)
-                data = bio.getvalue()
-                with self._lock:
-                    self._latest = (data, w, h)
-                    self._err = None
-            except Exception as e:  # noqa: BLE001
-                with self._lock:
-                    self._err = str(e)
+                cap = WindowsCapture(
+                    window_hwnd=hwnd,
+                    cursor_capture=False,
+                    **({"draw_border": False} if border_off else {}),
+                )
 
-        control = cap.start_free_threaded()
-        self._cap = cap
-        self._control = control
-        self._active_hwnd = hwnd
-        msg_out(f"启动WGC成功 hwnd: {hwnd}")
+                @cap.event
+                def on_closed() -> None:
+                    """捕获会话关闭（占位，无需处理）。"""
+                    msg_out(f"WGC 捕获会话关闭 hwnd: {hwnd}")
+
+                @cap.event
+                def on_frame_arrived(frame, _internal_capture_control):  # noqa: F841
+                    """新帧到达：按最小间隔将 BGRA 缓冲转为 JPEG 写入 `_latest`。"""
+                    if not first_frame_logged[0]:
+                        msg_out(f"捕获第一帧成功 hwnd: {hwnd}")
+                        first_frame_logged[0] = True
+                    now = time.monotonic()
+                    if (now - last_encode[0]) * 1000.0 < min_interval_ms:
+                        return
+                    last_encode[0] = now
+                    try:
+                        h, w, _ = frame.frame_buffer.shape
+                        raw = np.ascontiguousarray(frame.frame_buffer).tobytes()
+                        img = Image.frombytes("RGBA", (w, h), raw, "raw", "BGRA").convert("RGB")
+                        bio = io.BytesIO()
+                        img.save(bio, format="JPEG", quality=quality, optimize=False)
+                        data = bio.getvalue()
+                        with self._lock:
+                            self._latest = (data, w, h)
+                            self._err = None
+                    except Exception as e:  # noqa: BLE001
+                        with self._lock:
+                            self._err = str(e)
+
+                self._cap = cap
+                self._control = cap.start_free_threaded()
+                self._active_hwnd = hwnd
+                msg_out(f"启动WGC成功 hwnd: {hwnd}")
+                return
+            except Exception:
+                if border_off:
+                    continue
+                raise
