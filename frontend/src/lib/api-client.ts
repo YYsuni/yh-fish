@@ -146,6 +146,8 @@ export function postMusicStop() {
 export type ManagerStatusResponse = {
 	running: boolean
 	last_page_id: string | null
+	/** 执行器运行中且处于店长特供页时节流更新的多实例匹配调试（与捕获管线无关） */
+	match_debug?: unknown
 }
 
 export function getManagerStatus() {

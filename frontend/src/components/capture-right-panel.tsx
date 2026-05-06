@@ -2,7 +2,8 @@ import { formatLiveFpsLabel, parsePageMatch, useCaptureSession } from './capture
 import { MsgTerminalPanel } from './msg-terminal-panel'
 
 export function CaptureRightPanel() {
-	const { capture, error, preview, canvasRef, matchBoxCss, reelingBarOverlayBoxes, musicDrumOverlayBoxes, previewDebug } = useCaptureSession()
+	const { capture, error, preview, canvasRef, matchBoxCss, reelingBarOverlayBoxes, musicDrumOverlayBoxes, managerSupplyOverlayBoxes, previewDebug } =
+		useCaptureSession()
 	const { liveFps, pageMatch, cropDims } = preview
 	const summaryMatch = pageMatch ?? parsePageMatch(capture?.page_match ?? null)
 	return (
@@ -43,6 +44,11 @@ export function CaptureRightPanel() {
 										<span className='absolute bottom-0.5 left-0.5 rounded bg-black/55 px-1 text-[10px] leading-none font-medium text-white'>
 											{b.similarity != null ? b.similarity.toFixed(2) : '—'}
 										</span>
+									</div>
+								))}
+								{managerSupplyOverlayBoxes?.map(b => (
+									<div key={b.key} className='pointer-events-none absolute z-13 rounded-sm text-[8px] whitespace-nowrap' style={b.style} aria-hidden>
+										<div className='absolute top-full bg-black/80 text-white'>{b.similarity != null ? b.similarity.toFixed(2) : '—'}</div>
 									</div>
 								))}
 							</>

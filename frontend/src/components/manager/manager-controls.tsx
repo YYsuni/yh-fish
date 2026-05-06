@@ -65,9 +65,7 @@ export function ManagerControls({ manager }: { manager: ManagerRemote }) {
 		<section className='mt-auto'>
 			<div className='mb-1.5 flex justify-center'>
 				<span>运行状态：</span>
-				<div className='text-xs font-medium text-[#725d42]'>
-					{running ? `运行中${lastPage != null && lastPage !== '' ? ` · ${lastPage}` : ''}` : '已停止'}
-				</div>
+				<div className='text-xs font-medium text-[#725d42]'>{running ? '运行中' : '已停止'}</div>
 			</div>
 
 			<button className='brand-btn w-full' onClick={running ? onStop : onStart} disabled={busy}>
@@ -80,4 +78,3 @@ export function ManagerControls({ manager }: { manager: ManagerRemote }) {
 		</section>
 	)
 }
-

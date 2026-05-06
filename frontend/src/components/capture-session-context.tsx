@@ -19,10 +19,12 @@ import {
 	type PipelineMsPayload,
 	getCaptureWsUrl,
 	getCaptureStatus,
+	getManagerStatus,
 	postCaptureFps,
 	postCaptureMatchThreshold
 } from '../lib/api-client'
 import { normalizePipelineMs } from '../lib/capture-pipeline-debug'
+import { parseManagerSupplyMatchDebug, type ManagerSupplyMatchDebug } from '../lib/manager-supply-match-debug'
 import { parseMusicDrumDebug, type MusicDrumDebug } from '../lib/music-drum-debug'
 import { cropRectToCanvasOverlayCss } from '../lib/preview-canvas-overlay'
 import { parseReelingBarDebug, type ReelingBarDebug } from '../lib/reeling-bar-debug'
@@ -70,6 +72,7 @@ type PreviewOverlay = {
 	pipelineMs: PipelineMsPayload | null
 	reelingBarDebug: ReelingBarDebug | null
 	musicDrumDebug: MusicDrumDebug | null
+	managerSupplyMatchDebug: ManagerSupplyMatchDebug | null
 }
 
 const initialPreviewOverlay: PreviewOverlay = {
@@ -78,7 +81,8 @@ const initialPreviewOverlay: PreviewOverlay = {
 	cropDims: null,
 	pipelineMs: null,
 	reelingBarDebug: null,
-	musicDrumDebug: null
+	musicDrumDebug: null,
+	managerSupplyMatchDebug: null
 }
 
 export type ReelingBarOverlayBox = {
@@ -90,6 +94,13 @@ export type MusicDrumOverlayBox = {
 	key: string
 	style: CSSProperties
 	label: string
+	similarity: number | null
+}
+
+export type ManagerSupplyOverlayBox = {
+	key: string
+	style: CSSProperties
+	name: string | null
 	similarity: number | null
 }
 
@@ -110,6 +121,7 @@ export type CaptureSessionContextValue = {
 	matchBoxCss: CSSProperties | null
 	reelingBarOverlayBoxes: ReelingBarOverlayBox[] | null
 	musicDrumOverlayBoxes: MusicDrumOverlayBox[] | null
+	managerSupplyOverlayBoxes: ManagerSupplyOverlayBox[] | null
 	applyCaptureSettings: () => Promise<void>
 	refreshCapture: (options?: RefreshCaptureOptions) => Promise<void>
 	previewDebug: boolean
@@ -134,10 +146,11 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 	const [matchBoxCss, setMatchBoxCss] = useState<CSSProperties | null>(null)
 	const [reelingBarOverlayBoxes, setReelingBarOverlayBoxes] = useState<ReelingBarOverlayBox[] | null>(null)
 	const [musicDrumOverlayBoxes, setMusicDrumOverlayBoxes] = useState<MusicDrumOverlayBox[] | null>(null)
+	const [managerSupplyOverlayBoxes, setManagerSupplyOverlayBoxes] = useState<ManagerSupplyOverlayBox[] | null>(null)
 	const [layoutTick, setLayoutTick] = useState(0)
 	const [previewDebug, setPreviewDebug] = useState(true)
 
-	const { liveFps, pageMatch, cropDims, pipelineMs, reelingBarDebug, musicDrumDebug } = preview
+	const { liveFps, pageMatch, cropDims, pipelineMs, reelingBarDebug, musicDrumDebug, managerSupplyMatchDebug } = preview
 	const fpsSyncedOnce = useRef(false)
 	const matchThSyncedOnce = useRef(false)
 	const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -179,6 +192,31 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 		const id = setInterval(() => void refreshCapture(), 800)
 		return () => clearInterval(id)
 	}, [refreshCapture])
+
+	/** 店长特供多实例匹配仅在执行器运行后由 `/api/manager/status` 提供，不走捕获管线。 */
+	useEffect(() => {
+		if (capture?.capture_context !== 'manager') {
+			setPreview(p => ({ ...p, managerSupplyMatchDebug: null }))
+			return
+		}
+		let cancelled = false
+		const poll = async () => {
+			try {
+				const m = await getManagerStatus()
+				if (cancelled) return
+				const md = m.running && m.match_debug != null ? parseManagerSupplyMatchDebug(m.match_debug) : null
+				setPreview(p => ({ ...p, managerSupplyMatchDebug: md }))
+			} catch {
+				if (!cancelled) setPreview(p => ({ ...p, managerSupplyMatchDebug: null }))
+			}
+		}
+		void poll()
+		const id = window.setInterval(() => void poll(), 400)
+		return () => {
+			cancelled = true
+			window.clearInterval(id)
+		}
+	}, [capture?.capture_context])
 
 	useEffect(() => {
 		const canvas = canvasRef.current
@@ -255,6 +293,33 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 		}
 		setMusicDrumOverlayBoxes(boxes.length > 0 ? boxes : null)
 	}, [capture?.capture_context, musicDrumDebug, layoutTick, cropDims, capture?.width, capture?.height])
+
+	useLayoutEffect(() => {
+		const el = canvasRef.current
+		if (!el || capture?.capture_context !== 'manager' || pageMatch?.page_id !== 'manager-supply' || managerSupplyMatchDebug == null) {
+			setManagerSupplyOverlayBoxes(null)
+			return
+		}
+		const cropW = cropDims?.w ?? capture?.width ?? 0
+		const cropH = cropDims?.h ?? capture?.height ?? 0
+		if (cropW <= 0 || cropH <= 0) {
+			setManagerSupplyOverlayBoxes(null)
+			return
+		}
+		const boxes: ManagerSupplyOverlayBox[] = []
+		for (const item of managerSupplyMatchDebug.items) {
+			if (item.w <= 0 || item.h <= 0) continue
+			const style = cropRectToCanvasOverlayCss(el, cropW, cropH, item.x, item.y, item.w, item.h)
+			if (style == null) continue
+			boxes.push({
+				key: item.key || `mgr-${boxes.length}`,
+				style,
+				name: item.name?.trim() ? item.name.trim() : null,
+				similarity: item.similarity
+			})
+		}
+		setManagerSupplyOverlayBoxes(boxes.length > 0 ? boxes : null)
+	}, [capture?.capture_context, pageMatch?.page_id, managerSupplyMatchDebug, layoutTick, cropDims, capture?.width, capture?.height])
 
 	useEffect(() => {
 		const canvas = canvasRef.current
@@ -402,7 +467,15 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 		() => ({
 			capture,
 			error,
-			preview: { liveFps, pageMatch, cropDims, pipelineMs, reelingBarDebug, musicDrumDebug },
+			preview: {
+				liveFps,
+				pageMatch,
+				cropDims,
+				pipelineMs,
+				reelingBarDebug,
+				musicDrumDebug,
+				managerSupplyMatchDebug
+			},
 			fps,
 			setFps,
 			matchTh,
@@ -411,6 +484,7 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 			matchBoxCss,
 			reelingBarOverlayBoxes,
 			musicDrumOverlayBoxes,
+			managerSupplyOverlayBoxes,
 			applyCaptureSettings,
 			refreshCapture,
 			previewDebug,
@@ -425,11 +499,13 @@ export function CaptureSessionProvider({ children }: { children: ReactNode }) {
 			pipelineMs,
 			reelingBarDebug,
 			musicDrumDebug,
+			managerSupplyMatchDebug,
 			fps,
 			matchTh,
 			matchBoxCss,
 			reelingBarOverlayBoxes,
 			musicDrumOverlayBoxes,
+			managerSupplyOverlayBoxes,
 			applyCaptureSettings,
 			refreshCapture,
 			previewDebug

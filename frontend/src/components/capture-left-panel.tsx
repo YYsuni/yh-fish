@@ -96,13 +96,16 @@ export function CaptureLeftPanel({ workspace }: { workspace: WorkspaceTabId }) {
 					<Switch size='small' checked={previewDebug} onChange={setPreviewDebug} />
 				</div>
 
-				{workspace === 'fish' ? <AutoFishSettings fish={fish} /> : null}
+				{workspace === 'fish' && (
+					<>
+						<AutoFishSettings fish={fish} />
+						<AutoFishControls fish={fish} />
+					</>
+				)}
 
-				{workspace === 'fish' ? <AutoFishControls fish={fish} /> : null}
+				{workspace === 'music' && <MusicSettings music={music} />}
 
-				{workspace === 'music' ? <MusicSettings music={music} /> : null}
-
-				{workspace === 'manager' ? <ManagerSettings manager={manager} /> : null}
+				{workspace === 'manager' && <ManagerSettings manager={manager} />}
 			</div>
 
 			<AppSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />

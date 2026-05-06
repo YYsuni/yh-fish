@@ -234,6 +234,7 @@ class CaptureService:
         """设置 OpenCV 模板匹配下限（0–1）；钓鱼与超强音共用同一阈值。"""
         v = self._matcher_auto_fish.set_match_threshold(threshold)
         self._matcher_music.set_match_threshold(v)
+        self._matcher_manager.set_match_threshold(v)
         return v
 
     def get_page_match_threshold(self) -> float:

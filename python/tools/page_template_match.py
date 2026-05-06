@@ -7,6 +7,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -169,6 +170,251 @@ def match_template_score_in_precrop_roi(
     if r is None:
         return None
     return float(r[4])
+
+
+def _iou_xywh(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    """轴对齐矩形 IoU，均为 ``(x, y, w, h)``。"""
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    a_x2, a_y2 = ax + aw, ay + ah
+    b_x2, b_y2 = bx + bw, by + bh
+    ix0, iy0 = max(ax, bx), max(ay, by)
+    ix1, iy1 = min(a_x2, b_x2), min(a_y2, b_y2)
+    iw_, ih_ = ix1 - ix0, iy1 - iy0
+    if iw_ <= 0 or ih_ <= 0:
+        return 0.0
+    inter = float(iw_ * ih_)
+    ua = float(aw * ah + bw * bh) - inter
+    return inter / ua if ua > 0 else 0.0
+
+
+def _greedy_nms_xywh_conf(
+    hits: list[tuple[int, int, int, int, float]],
+    *,
+    iou_thresh: float,
+    max_keep: int,
+) -> list[tuple[int, int, int, int, float]]:
+    """``(x, y, w, h, confidence)`` 按置信度降序贪心 NMS。"""
+    if not hits or max_keep <= 0:
+        return []
+    ordered = sorted(hits, key=lambda t: t[4], reverse=True)
+    kept: list[tuple[int, int, int, int, float]] = []
+    for h in ordered:
+        if len(kept) >= max_keep:
+            break
+        box = h[:4]
+        if any(_iou_xywh(box, k[:4]) >= iou_thresh for k in kept):
+            continue
+        kept.append(h)
+    return kept
+
+
+def _iterative_peaks_in_roi(
+    roi: np.ndarray,
+    tpl_rgb: np.ndarray,
+    region_origin: tuple[int, int, int, int],
+    *,
+    threshold: float,
+    peak_cap: int,
+    suppress_margin: float = 0.22,
+) -> list[tuple[int, int, int, int, float]]:
+    """在 ROI 上对固定尺寸模板迭代取 TM_CCOEFF_NORMED 峰值并抑制邻域，返回裁剪坐标系下的 ``(x,y,w,h,conf)``。"""
+    rx, ry, _, _ = region_origin
+    sh, sw = roi.shape[:2]
+    th, tw = tpl_rgb.shape[:2]
+    if th > sh or tw > sw or th < 1 or tw < 1:
+        return []
+    res = cv2.matchTemplate(roi, tpl_rgb, cv2.TM_CCOEFF_NORMED)
+    work = res.astype(np.float32).copy()
+    hits: list[tuple[int, int, int, int, float]] = []
+    px = max(2, int(round(tw * suppress_margin)))
+    py = max(2, int(round(th * suppress_margin)))
+    for _ in range(max(1, peak_cap)):
+        _min_v, max_v, _min_loc, max_loc = cv2.minMaxLoc(work)
+        if float(max_v) < threshold:
+            break
+        mx, my = int(max_loc[0]), int(max_loc[1])
+        hits.append((rx + mx, ry + my, tw, th, float(max_v)))
+        x0 = max(0, mx - px)
+        y0 = max(0, my - py)
+        x1 = min(work.shape[1], mx + tw + px)
+        y1 = min(work.shape[0], my + th + py)
+        work[y0:y1, x0:x1] = -1.0
+    return hits
+
+
+def match_template_multi_in_precrop_roi(
+    cropped_rgb: Image.Image,
+    template_path: Path,
+    region_xywh_precrop: tuple[float, float, float, float],
+    *,
+    threshold: float,
+    max_matches: int = 16,
+    nms_iou: float = 0.35,
+    peak_cap: int = 8,
+) -> list[dict[str, Any]]:
+    """在整窗未裁坐标系 ROI 内，对模板原尺寸做多峰值匹配，经 NMS 合并；返回可 JSON 序列化的 ``items``。"""
+    if not template_path.is_file():
+        return []
+    try:
+        im = Image.open(template_path).convert("RGB")
+        base_tpl = np.asarray(im)
+    except OSError:
+        return []
+    if base_tpl.ndim != 3 or base_tpl.shape[2] != 3:
+        return []
+    try:
+        rect_adj = _apply_pre_crop_offset(
+            list(region_xywh_precrop),
+            left_px=DEFAULT_PRE_CROP_LEFT_PX,
+            top_px=DEFAULT_PRE_CROP_TOP_PX,
+        )
+        region = tuple(int(round(float(v))) for v in rect_adj)
+    except (TypeError, ValueError):
+        return []
+    scene = np.asarray(cropped_rgb.convert("RGB"))
+    if scene.ndim != 3 or scene.shape[2] != 3:
+        return []
+    roi = _crop_rgb_by_rect(scene, region)
+    if roi is None:
+        return []
+    rx, ry, rw, rh = region
+    th, tw = int(base_tpl.shape[0]), int(base_tpl.shape[1])
+    if tw > rw or th > rh or th < 1 or tw < 1:
+        return []
+    merged: list[tuple[int, int, int, int, float]] = []
+    for x, y, w_, h_, conf in _iterative_peaks_in_roi(
+        roi,
+        base_tpl,
+        (rx, ry, rw, rh),
+        threshold=float(threshold),
+        peak_cap=peak_cap,
+    ):
+        merged.append((x, y, w_, h_, conf))
+    nms_t = max(0.05, min(0.95, float(nms_iou)))
+    kept = _greedy_nms_xywh_conf(merged, iou_thresh=nms_t, max_keep=max_matches)
+    out: list[dict[str, Any]] = []
+    for i, (x, y, w_, h_, conf) in enumerate(kept):
+        out.append(
+            {
+                "key": f"hit-{i}",
+                "x": int(x),
+                "y": int(y),
+                "w": int(w_),
+                "h": int(h_),
+                "similarity": float(conf),
+            }
+        )
+    return out
+
+
+_MANAGER_SUPPLY_CFG_MTIME: float = -1.0
+_MANAGER_SUPPLY_CFG_CACHE: dict[str, Any] | None = None
+
+
+def load_manager_supply_multi_match_config(pages_json: Path) -> dict[str, Any] | None:
+    """读取 ``manager/page.json`` 中 ``id=manager-supply`` 的 ``multi_match``；缺省时用首个 ``features`` 的 file/region。"""
+    global _MANAGER_SUPPLY_CFG_MTIME, _MANAGER_SUPPLY_CFG_CACHE
+    try:
+        mtime = float(pages_json.stat().st_mtime)
+    except OSError:
+        return None
+    if mtime == _MANAGER_SUPPLY_CFG_MTIME and _MANAGER_SUPPLY_CFG_CACHE is not None:
+        return _MANAGER_SUPPLY_CFG_CACHE
+    _MANAGER_SUPPLY_CFG_MTIME = mtime
+    _MANAGER_SUPPLY_CFG_CACHE = None
+    if not pages_json.is_file():
+        return None
+    try:
+        data = json.loads(pages_json.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    pages = data.get("pages") if isinstance(data, dict) else None
+    if not isinstance(pages, list):
+        return None
+    base = pages_json.parent
+    target: dict[str, Any] | None = None
+    for p in pages:
+        if not isinstance(p, dict):
+            continue
+        if str(p.get("id") or "") != "manager-supply":
+            continue
+        target = p
+        break
+    if target is None:
+        return None
+    mm = target.get("multi_match")
+    if isinstance(mm, dict) and isinstance(mm.get("file"), str) and mm.get("file", "").strip():
+        fn = str(mm["file"]).strip()
+        reg = mm.get("region")
+        if isinstance(reg, list) and len(reg) == 4:
+            try:
+                region_t = tuple(float(reg[i]) for i in range(4))
+                max_m = int(mm["max_matches"]) if isinstance(mm.get("max_matches"), (int, float)) else 16
+                max_m = max(1, min(64, max_m))
+                nms = float(mm["nms_iou"]) if isinstance(mm.get("nms_iou"), (int, float)) else 0.35
+                nms = max(0.05, min(0.95, nms))
+                _MANAGER_SUPPLY_CFG_CACHE = {
+                    "template_path": (base / fn).resolve(),
+                    "region_precrop": region_t,
+                    "max_matches": max_m,
+                    "nms_iou": nms,
+                }
+                return _MANAGER_SUPPLY_CFG_CACHE
+            except (TypeError, ValueError):
+                pass
+    feats = target.get("features")
+    if not isinstance(feats, list) or not feats:
+        return None
+    f0 = feats[0]
+    if not isinstance(f0, dict):
+        return None
+    fn = f0.get("file")
+    reg = f0.get("region")
+    if not isinstance(fn, str) or not fn.strip():
+        return None
+    if not isinstance(reg, list) or len(reg) != 4:
+        return None
+    try:
+        region_t = tuple(float(reg[i]) for i in range(4))
+    except (TypeError, ValueError):
+        return None
+    _MANAGER_SUPPLY_CFG_CACHE = {
+        "template_path": (base / str(fn).strip()).resolve(),
+        "region_precrop": region_t,
+        "max_matches": 16,
+        "nms_iou": 0.35,
+    }
+    return _MANAGER_SUPPLY_CFG_CACHE
+
+
+def compute_manager_supply_match_debug(
+    cropped_rgb: Image.Image,
+    pages_json: Path,
+    *,
+    threshold: float,
+) -> dict[str, object] | None:
+    """店长特供页：按 ``multi_match``（或首特征）在 ROI 内做多实例匹配，供前端画框。"""
+    cfg = load_manager_supply_multi_match_config(pages_json)
+    if cfg is None:
+        return None
+    tp = cfg["template_path"]
+    if not isinstance(tp, Path) or not tp.is_file():
+        return {"match_ms": 0.0, "items": []}
+    region_precrop = cfg["region_precrop"]
+    max_matches = int(cfg["max_matches"])
+    nms_iou = float(cfg["nms_iou"])
+    t0 = time.perf_counter()
+    items = match_template_multi_in_precrop_roi(
+        cropped_rgb,
+        tp,
+        region_precrop,
+        threshold=float(threshold),
+        max_matches=max_matches,
+        nms_iou=nms_iou,
+    )
+    ms = (time.perf_counter() - t0) * 1000.0
+    return {"match_ms": round(ms, 3), "items": items}
 
 
 # 与 `auto_fish_executor._page_reeling` 同一 ROI 与阈值；整窗未裁坐标系 [x, y, w, h]

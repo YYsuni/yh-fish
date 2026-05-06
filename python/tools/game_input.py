@@ -15,6 +15,7 @@ def set_click_offset_provider(fn: Callable[[], tuple[int, int]] | None) -> None:
     global _click_offset_provider
     _click_offset_provider = fn
 
+
 VK_E = 0x45
 VK_F = 0x46
 VK_A = 0x41
@@ -368,7 +369,9 @@ if sys.platform == "win32":
         *,
         from_precrop: bool = True,
         bring_foreground: bool = True,
+        # 光标到位后、按下左键前的停留秒数；None 用 MOUSE_HOVER_DWELL_S；<=0 跳过悬停
         hover_dwell_s: float | None = None,
+        # 左键按下到抬起之间的保持秒数；None 用 MOUSE_CLICK_HOLD_S
         hold_s: float | None = None,
     ) -> bool:
         """物理左键：可选置前 + 本线程临时 Per-Monitor V2 DPI + SetCursorPos + SendInput（与消息路径不同）。
