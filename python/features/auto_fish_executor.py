@@ -18,7 +18,6 @@ from tools.page_template_match import (
     match_template_in_precrop_roi,
     match_template_score_in_precrop_roi,
 )
-from tools.window_capture import wgc_precrop_xy_to_client
 
 _log = logging.getLogger(__name__)
 
@@ -87,7 +86,11 @@ def _click_page_match(
     cy = y + h // 2
     exec_msg.msg_out(f"{label}：点击匹配区中心 ({cx}, {cy})")
     if physical:
-        return bool(game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2))
+        return bool(
+            game_input.send_left_click_physical(
+                ctx.hwnd, cx, cy, from_precrop=False, hover_dwell_s=0.45, hold_s=0.2
+            )
+        )
 
     return bool(game_input.send_left_click(ctx.hwnd, cx, cy))
 
@@ -144,9 +147,8 @@ def _page_start_fishing(ctx: TickContext) -> None:
     if ctx.logic_state == LOGIC_SELL_FISH:
         if not ctx.cooldown.try_fire("start-fishing:sell-click", 3.0, ctx.monotonic):
             return
-        cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 1010, 707)
         exec_msg.msg_out("开始钓鱼页面：点击仓库")
-        game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+        game_input.send_left_click_physical(ctx.hwnd, 1010, 707, hover_dwell_s=0.45, hold_s=0.2)
         return
     if ctx.logic_state == LOGIC_BAIT:
         if not ctx.cooldown.try_fire("start-fishing:buy-bait-e", 3.0, ctx.monotonic):
@@ -169,9 +171,8 @@ def _page_fishing_prep(ctx: TickContext) -> None:
     if ctx.logic_state == LOGIC_BAIT:
         if not ctx.cooldown.try_fire("fishing-prep:buy-bait-click", 3.0, ctx.monotonic):
             return
-        cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 1136, 556)
         exec_msg.msg_out("钓鱼准备页面：选择鱼饵")
-        game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+        game_input.send_left_click_physical(ctx.hwnd, 1136, 556, hover_dwell_s=0.45, hold_s=0.2)
         return
     if ctx.apply_logic_state is not None:
         ctx.apply_logic_state(LOGIC_BAIT)
@@ -247,16 +248,14 @@ def _page_change_bait(ctx: TickContext) -> None:
     c_pur = float("-inf") if s_purchase is None else float(s_purchase)
     if ctx.apply_logic_state is not None:
         ctx.apply_logic_state(LOGIC_FISHING if c_change > c_pur else LOGIC_BAIT)
-    cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 761, 516)
-    game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+    game_input.send_left_click_physical(ctx.hwnd, 761, 516, hover_dwell_s=0.45, hold_s=0.2)
 
 
 def _page_tip(ctx: TickContext) -> None:
     if not ctx.cooldown.try_fire("tip:click", 3.0, ctx.monotonic):
         return
-    cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 756, 519)
     exec_msg.msg_out("提示页面：点击确认")
-    game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+    game_input.send_left_click_physical(ctx.hwnd, 756, 519, hover_dwell_s=0.45, hold_s=0.2)
     if ctx.apply_logic_state is None:
         return
     if ctx.logic_state == LOGIC_SELL_FISH:
@@ -279,6 +278,7 @@ def _page_tip_no_fish(ctx: TickContext) -> None:
 
 
 def _page_shop(ctx: TickContext) -> None:
+    """渔具商店页面"""
     if ctx.logic_state == LOGIC_FISHING:
         if not ctx.cooldown.try_fire("shop:buy-bait-esc", 3.0, ctx.monotonic):
             return
@@ -305,23 +305,20 @@ def _page_shop(ctx: TickContext) -> None:
     cx = x + w // 2
     cy = y + h // 2
     exec_msg.msg_out("渔具商店：点击万能鱼饵")
-    game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+    game_input.send_left_click_physical(ctx.hwnd, cx, cy, from_precrop=False, hover_dwell_s=0.45, hold_s=0.2)
     time.sleep(0.5)
-    cx2, cy2 = wgc_precrop_xy_to_client(ctx.hwnd, 1214, 682)
     exec_msg.msg_out("渔具商店：点击最大数量")
-    game_input.send_left_click_physical(ctx.hwnd, cx2, cy2, hover_dwell_s=0.45, hold_s=0.2)
+    game_input.send_left_click_physical(ctx.hwnd, 1214, 682, hover_dwell_s=0.45, hold_s=0.2)
     time.sleep(0.4)
-    cx3, cy3 = wgc_precrop_xy_to_client(ctx.hwnd, 1026, 736)
     exec_msg.msg_out("渔具商店：点击购买")
-    game_input.send_left_click_physical(ctx.hwnd, cx3, cy3, hover_dwell_s=0.45, hold_s=0.2)
+    game_input.send_left_click_physical(ctx.hwnd, 1026, 736, hover_dwell_s=0.45, hold_s=0.2)
 
 
 def _page_market(ctx: TickContext) -> None:
     if not ctx.cooldown.try_fire("market:click", 3.0, ctx.monotonic):
         return
-    cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 100, 327)
     exec_msg.msg_out("渔获市场页面：点击归流鱼仓")
-    game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+    game_input.send_left_click_physical(ctx.hwnd, 100, 327, hover_dwell_s=0.45, hold_s=0.2)
 
 
 def _page_fish_storage(ctx: TickContext) -> None:
@@ -331,9 +328,8 @@ def _page_fish_storage(ctx: TickContext) -> None:
         exec_msg.msg_out("归流鱼舱页面：ESC 关闭")
         game_input.send_key_tap(ctx.hwnd, game_input.VK_ESCAPE)
         return
-    cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 687, 690)
     exec_msg.msg_out("归流鱼舱页面：点击卖出")
-    game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+    game_input.send_left_click_physical(ctx.hwnd, 687, 690, hover_dwell_s=0.45, hold_s=0.2)
     if ctx.apply_logic_state is not None:
         ctx.apply_logic_state(LOGIC_BAIT)
 
@@ -341,17 +337,15 @@ def _page_fish_storage(ctx: TickContext) -> None:
 def _page_one_click_sell(ctx: TickContext) -> None:
     if not ctx.cooldown.try_fire("one-click-sell:click", 3.0, ctx.monotonic):
         return
-    cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, int(747.5), int(516.22))
     exec_msg.msg_out("一键出售页面：点击确认")
-    game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+    game_input.send_left_click_physical(ctx.hwnd, int(747.5), int(516.22), hover_dwell_s=0.45, hold_s=0.2)
 
 
 def _page_month_card(ctx: TickContext) -> None:
     if not ctx.cooldown.try_fire("month-card:click", 3.0, ctx.monotonic):
         return
-    cx, cy = wgc_precrop_xy_to_client(ctx.hwnd, 635, 366)
     exec_msg.msg_out("月卡页面：点击领取")
-    game_input.send_left_click_physical(ctx.hwnd, cx, cy, hover_dwell_s=0.45, hold_s=0.2)
+    game_input.send_left_click_physical(ctx.hwnd, 635, 366, hover_dwell_s=0.45, hold_s=0.2)
 
 
 PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {

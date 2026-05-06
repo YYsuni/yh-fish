@@ -174,17 +174,21 @@ export type HotkeyPayload = {
 	meta: boolean
 }
 
-export type HotkeysPayload = {
+export type AppSettingsPayload = {
 	start: HotkeyPayload
 	stop: HotkeyPayload
+	/** 物理点击整窗坐标换算为客户区后额外加上的 X（像素）；向左用负数，默认 0 */
+	click_offset_x: number
+	/** 物理点击整窗坐标换算为客户区后额外加上的 Y（像素）；向上用负数，默认 0 */
+	click_offset_y: number
 }
 
-export function getHotkeys() {
-	return fetchJson<HotkeysPayload>('/api/hotkeys')
+export function getAppSettings() {
+	return fetchJson<AppSettingsPayload>('/api/settings')
 }
 
-export function postHotkeys(body: HotkeysPayload) {
-	return fetchJson<HotkeysPayload>('/api/hotkeys', {
+export function postAppSettings(body: AppSettingsPayload) {
+	return fetchJson<AppSettingsPayload>('/api/settings', {
 		method: 'POST',
 		body: JSON.stringify(body)
 	})

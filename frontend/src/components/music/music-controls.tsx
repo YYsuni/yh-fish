@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMusicStatus } from '../../hooks/use-music-status'
 import { postMusicStart, postMusicStop } from '../../lib/api-client'
-import { getHotkeys } from '../../lib/api-client'
+import { getAppSettings } from '../../lib/api-client'
 import type { Hotkey, Hotkeys } from '../../lib/hotkeys'
 import { formatHotkey, HOTKEYS_UPDATED_EVENT } from '../../lib/hotkeys'
 
@@ -19,7 +19,8 @@ export function MusicControls({ music }: { music: MusicRemote }) {
 	useEffect(() => {
 		void (async () => {
 			try {
-				setHotkeys(await getHotkeys())
+				const s = await getAppSettings()
+				setHotkeys({ start: s.start, stop: s.stop })
 			} catch (e) {
 				console.error(e)
 			}

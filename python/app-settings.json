@@ -12,5 +12,7 @@
     "shift": false,
     "alt": false,
     "meta": false
-  }
+  },
+  "click_offset_x": 0,
+  "click_offset_y": 0
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useManagerStatus } from '../../hooks/use-manager-status'
-import { getHotkeys, postManagerStart, postManagerStop } from '../../lib/api-client'
+import { getAppSettings, postManagerStart, postManagerStop } from '../../lib/api-client'
 import type { Hotkey, Hotkeys } from '../../lib/hotkeys'
 import { formatHotkey, HOTKEYS_UPDATED_EVENT } from '../../lib/hotkeys'
 
@@ -18,7 +18,8 @@ export function ManagerControls({ manager }: { manager: ManagerRemote }) {
 	useEffect(() => {
 		void (async () => {
 			try {
-				setHotkeys(await getHotkeys())
+				const s = await getAppSettings()
+				setHotkeys({ start: s.start, stop: s.stop })
 			} catch (e) {
 				console.error(e)
 			}

@@ -5,6 +5,15 @@ from __future__ import annotations
 
 import sys
 import time
+from typing import Callable
+
+_click_offset_provider: Callable[[], tuple[int, int]] | None = None
+
+
+def set_click_offset_provider(fn: Callable[[], tuple[int, int]] | None) -> None:
+    """注册从应用设置读取 ``(click_offset_x, click_offset_y)`` 的回调；供 ``send_left_click_physical`` 在 ``from_precrop=True`` 时使用。"""
+    global _click_offset_provider
+    _click_offset_provider = fn
 
 VK_E = 0x45
 VK_F = 0x46
@@ -354,23 +363,37 @@ if sys.platform == "win32":
 
     def send_left_click_physical(
         hwnd: int,
-        client_x: int,
-        client_y: int,
+        x: int,
+        y: int,
         *,
+        from_precrop: bool = True,
         bring_foreground: bool = True,
         hover_dwell_s: float | None = None,
         hold_s: float | None = None,
     ) -> bool:
         """物理左键：可选置前 + 本线程临时 Per-Monitor V2 DPI + SetCursorPos + SendInput（与消息路径不同）。
 
-        ``client_x`` / ``client_y`` 须为 **HWND 客户区** 像素（与 ``WM_*`` 鼠标消息、``ClientToScreen`` 一致），
-        不含标题栏与整窗左右约 2px 边带。若在 **WGC 整帧**（与 ``capture_service`` 解码前 JPEG 同坐标系）上取点，
-        请先调用 ``tools.window_capture.wgc_precrop_xy_to_client`` 再传入本函数。
+        ``from_precrop=True``（默认）：``x``/``y`` 为 **WGC 整帧** 与 ``capture_service`` 解码前 JPEG 同坐标系的像素；
+        本函数内先按 ``wgc_precrop_xy_to_client`` 规则（将 ``app-settings.json`` 中 ``click_offset_x`` / ``click_offset_y`` 加到换算结果上）得到 HWND 客户区坐标，再 ``ClientToScreen``。
+
+        ``from_precrop=False``：``x``/``y`` 已为 **客户区** 像素（例如模板匹配在裁剪后画面上得到的矩形中心），不做整窗换算。
         """
+        from tools.window_capture import wgc_precrop_xy_to_client
+
         src = int(hwnd)
         if src <= 0 or not _user32.IsWindow(wintypes.HWND(src)):
             return False
-        cx, cy = int(client_x), int(client_y)
+        if from_precrop:
+            ox, oy = 0, 0
+            prov = _click_offset_provider
+            if prov is not None:
+                try:
+                    ox, oy = prov()
+                except Exception:
+                    ox, oy = (0, 0)
+            cx, cy = wgc_precrop_xy_to_client(src, int(x), int(y), offset_x=int(ox), offset_y=int(oy))
+        else:
+            cx, cy = int(x), int(y)
         prev_dpi = None
         if _set_thread_dpi_ctx is not None:
             prev_dpi = _set_thread_dpi_ctx(wintypes.HANDLE(_DPI_AWARE_PER_MONITOR_V2))
@@ -435,9 +458,10 @@ else:
 
     def send_left_click_physical(
         hwnd: int,
-        client_x: int,
-        client_y: int,
+        x: int,
+        y: int,
         *,
+        from_precrop: bool = True,
         bring_foreground: bool = True,
         hover_dwell_s: float | None = None,
         hold_s: float | None = None,

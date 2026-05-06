@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAutoFishStatus } from '../../hooks/use-auto-fish-status'
 import { postAutoFishStart, postAutoFishStop } from '../../lib/api-client'
-import { getHotkeys } from '../../lib/api-client'
+import { getAppSettings } from '../../lib/api-client'
 import type { Hotkey, Hotkeys } from '../../lib/hotkeys'
 import { formatHotkey, HOTKEYS_UPDATED_EVENT } from '../../lib/hotkeys'
 
@@ -26,7 +26,8 @@ export function AutoFishControls({ fish }: { fish: AutoFishRemote }) {
 	useEffect(() => {
 		void (async () => {
 			try {
-				setHotkeys(await getHotkeys())
+				const s = await getAppSettings()
+				setHotkeys({ start: s.start, stop: s.stop })
 			} catch (e) {
 				console.error(e)
 			}

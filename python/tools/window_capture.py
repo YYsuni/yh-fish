@@ -89,13 +89,22 @@ else:
         return max(0, int(pt.y - outer.top))
 
 
-def wgc_precrop_xy_to_client(hwnd: int, precrop_x: int, precrop_y: int) -> tuple[int, int]:
+def wgc_precrop_xy_to_client(
+    hwnd: int,
+    precrop_x: int,
+    precrop_y: int,
+    *,
+    offset_x: int = 0,
+    offset_y: int = 0,
+) -> tuple[int, int]:
     """将 WGC 整帧（含标题栏与左右约 ``WGC_SNAPSHOT_MARGIN_LR_PX`` 阴影带）像素坐标转为 HWND 客户区坐标。
 
     与 ``capture_service._decode_and_crop_rgb`` 的裁切一致：左减 ``WGC_SNAPSHOT_MARGIN_LR_PX``，上减
-    ``window_title_bar_crop_px``。供 ``game_input.send_left_click_physical`` 等需 ``ClientToScreen`` 的路径在
-    传入「整窗截图」坐标前先调用。
+    ``window_title_bar_crop_px``，再加上 ``offset_x`` / ``offset_y``（应用设置里的点击校准；反方向写负数）。物理点击路径下由
+    ``tools.game_input.send_left_click_physical(..., from_precrop=True)`` 注入并调用本函数。
     """
-    h = int(hwnd)
-    top = window_title_bar_crop_px(h)
-    return (int(precrop_x) - WGC_SNAPSHOT_MARGIN_LR_PX, int(precrop_y) - top)
+    top = window_title_bar_crop_px(int(hwnd))
+    return (
+        int(precrop_x) - WGC_SNAPSHOT_MARGIN_LR_PX + int(offset_x),
+        int(precrop_y) - top + int(offset_y),
+    )

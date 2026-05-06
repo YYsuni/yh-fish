@@ -21,7 +21,8 @@ from capture_service import CaptureService
 from features.manager_executor import ManagerExecutor
 from features.music_executor import MusicExecutor
 from tools.exec_msg import snapshot as msg_snapshot, start_admin_warn_loop, stop_admin_warn_loop
-from tools.hotkeys import HotkeyPayload, HotkeysPayload, load_hotkeys, save_hotkeys
+import tools.game_input as game_input
+from tools.app_settings import AppSettingsPayload, HotkeyPayload, load_app_settings, save_app_settings
 
 _log = logging.getLogger(__name__)
 
@@ -72,14 +73,22 @@ def create_app(
 ) -> FastAPI:
     """组装 FastAPI：捕获相关 API，可选 SPA 静态目录。"""
 
-    hotkeys_lock = threading.Lock()
-    hotkeys_state: HotkeysPayload = load_hotkeys(base_dir=PY_DIR)
+    app_settings_lock = threading.Lock()
+    app_settings_state: AppSettingsPayload = load_app_settings(base_dir=PY_DIR)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         """进程生命周期内启动/停止捕获后台线程。"""
         capture.start_background()
         start_admin_warn_loop()
+
+        def _click_offsets() -> tuple[int, int]:
+            with app_settings_lock:
+                s = app_settings_state
+                return (int(s.click_offset_x), int(s.click_offset_y))
+
+        game_input.set_click_offset_provider(_click_offsets)
+
         hotkey_done = threading.Event()
 
         def _hotkey_listener() -> None:
@@ -153,8 +162,8 @@ def create_app(
                 if key is None:
                     return
 
-                with hotkeys_lock:
-                    hk = hotkeys_state
+                with app_settings_lock:
+                    hk = app_settings_state
 
                 mods = _mods_snapshot()
 
@@ -239,20 +248,20 @@ def create_app(
         allow_headers=["*"],
     )
 
-    @app.get("/api/hotkeys")
-    def get_hotkeys() -> dict[str, Any]:
-        """读取全局快捷键配置（由后端主导，持久化到 python/hotkeys.json）。"""
-        with hotkeys_lock:
-            return hotkeys_state.model_dump()
+    @app.get("/api/settings")
+    def get_app_settings() -> dict[str, Any]:
+        """读取应用设置（快捷键、点击校准等，持久化到 python/app-settings.json）。"""
+        with app_settings_lock:
+            return app_settings_state.model_dump()
 
-    @app.post("/api/hotkeys")
-    def set_hotkeys(body: HotkeysPayload) -> dict[str, Any]:
-        """更新全局快捷键配置，并持久化到 python/hotkeys.json。"""
-        nonlocal hotkeys_state
-        with hotkeys_lock:
-            hotkeys_state = body
-            save_hotkeys(base_dir=PY_DIR, hotkeys=hotkeys_state)
-            return hotkeys_state.model_dump()
+    @app.post("/api/settings")
+    def set_app_settings(body: AppSettingsPayload) -> dict[str, Any]:
+        """更新应用设置并持久化。"""
+        nonlocal app_settings_state
+        with app_settings_lock:
+            app_settings_state = body
+            save_app_settings(base_dir=PY_DIR, settings=app_settings_state)
+            return app_settings_state.model_dump()
 
     @app.get("/api/capture/status")
     def cap_status() -> dict[str, Any]:

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Hotkey, HotkeyId } from '../../lib/hotkeys'
 import { formatHotkey, isModifierKey } from '../../lib/hotkeys'
 import { Modal } from '../ui/modal'
