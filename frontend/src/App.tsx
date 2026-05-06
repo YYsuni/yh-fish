@@ -7,6 +7,8 @@ import { CaptureRightPanel } from './components/capture-right-panel'
 import { CaptureSessionProvider, useCaptureSession } from './components/capture-session-context'
 import AppTitleBar from './components/app-title-bar'
 import type { WorkspaceTabId } from './components/workspace-types'
+import { IconFish } from './components/icons/icon-fish'
+import BgPattern from './components/ui/bg-pattern'
 
 function AppWorkspaceShell() {
 	const [workspace, setWorkspace] = useState<WorkspaceTabId>('fish')
@@ -66,17 +68,23 @@ function AppWorkspaceShell() {
 
 function App() {
 	return (
-		<div
-			className='bg-bg text-primary flex min-h-screen flex-col'
-			style={{
-				backgroundImage: 'repeating-linear-gradient(-45deg, #ffffff05 0 3px, transparent 3px 6px)'
-			}}>
-			<AppTitleBar />
-			<AppErrorBoundary>
-				<CaptureSessionProvider>
-					<AppWorkspaceShell />
-				</CaptureSessionProvider>
-			</AppErrorBoundary>
+		<div className='bg-bg text-primary flex h-screen flex-col overflow-hidden'>
+			<BgPattern />
+
+			<div
+				className='absolute inset-0'
+				style={{
+					backgroundImage: 'repeating-linear-gradient(-45deg, #ffffff05 0 2px, #34579c66 2px 4px)'
+				}}></div>
+
+			<div className='relative'>
+				<AppTitleBar />
+				<AppErrorBoundary>
+					<CaptureSessionProvider>
+						<AppWorkspaceShell />
+					</CaptureSessionProvider>
+				</AppErrorBoundary>
+			</div>
 		</div>
 	)
 }
