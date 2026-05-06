@@ -1,10 +1,12 @@
 import { RangeSlider } from './ui/range-slider'
 import { Switch } from './ui/switch'
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAutoFishStatus } from '../hooks/use-auto-fish-status'
 import { useMusicStatus } from '../hooks/use-music-status'
 import { AutoFishControls } from './auto-fish/auto-fish-controls'
 import { AutoFishSettings } from './auto-fish/auto-fish-settings'
+import { IconSettings } from './icons/icon-settings'
+import { HotkeySettingsModal } from './hotkeys/hotkey-settings-modal'
 import { MusicSettings } from './music/music-settings'
 import { FPS_MAX, FPS_MIN, MATCH_TH_MAX, MATCH_TH_MIN, useCaptureSession } from './capture-session-context'
 import type { WorkspaceTabId } from './workspace-types'
@@ -32,10 +34,20 @@ export function CaptureLeftPanel({ workspace }: { workspace: WorkspaceTabId }) {
 
 	const fish = useAutoFishStatus()
 	const music = useMusicStatus()
+	const [settingsOpen, setSettingsOpen] = useState(false)
 
 	return (
 		<aside className='card col-span-2 flex flex-col'>
-			<h2 className='card-title'>运行配置</h2>
+			<div className='card-title flex items-center justify-between gap-3'>
+				<h2>运行配置</h2>
+				<button
+					type='button'
+					aria-label='设置'
+					className='rounded-xl border border-black/30 bg-white/25 p-2 text-black/70 hover:bg-white/35'
+					onClick={() => setSettingsOpen(true)}>
+					<IconSettings className='h-4 w-4' />
+				</button>
+			</div>
 
 			<div
 				className='card-content flex flex-1 flex-col gap-4 pb-4 text-xs font-medium text-[#725d42]'
@@ -85,6 +97,8 @@ export function CaptureLeftPanel({ workspace }: { workspace: WorkspaceTabId }) {
 
 				{workspace === 'fish' ? <AutoFishControls fish={fish} /> : <MusicSettings music={music} />}
 			</div>
+
+			<HotkeySettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 		</aside>
 	)
 }
