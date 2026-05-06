@@ -143,6 +143,30 @@ export function postMusicStop() {
 	})
 }
 
+export type HotkeyPayload = {
+	key: string | null
+	ctrl: boolean
+	shift: boolean
+	alt: boolean
+	meta: boolean
+}
+
+export type HotkeysPayload = {
+	start: HotkeyPayload
+	stop: HotkeyPayload
+}
+
+export function getHotkeys() {
+	return fetchJson<HotkeysPayload>('/api/hotkeys')
+}
+
+export function postHotkeys(body: HotkeysPayload) {
+	return fetchJson<HotkeysPayload>('/api/hotkeys', {
+		method: 'POST',
+		body: JSON.stringify(body)
+	})
+}
+
 export type MsgLogLine = { t: number; m: string }
 
 export type MsgLogResponse = { lines: MsgLogLine[] }

@@ -20,6 +20,7 @@ from auto_fish_executor import AutoFishExecutor
 from capture_service import CaptureService
 from music_executor import MusicExecutor
 from tools.exec_msg import snapshot as msg_snapshot, start_admin_warn_loop, stop_admin_warn_loop
+from tools.hotkeys import HotkeyPayload, HotkeysPayload, load_hotkeys, save_hotkeys
 
 _log = logging.getLogger(__name__)
 
@@ -56,6 +57,9 @@ class SetAutoFishSellOnNoBaitBody(BaseModel):
     enabled: bool
 
 
+PY_DIR = Path(__file__).resolve().parent
+
+
 def create_app(
     *,
     capture: CaptureService,
@@ -66,30 +70,146 @@ def create_app(
 ) -> FastAPI:
     """组装 FastAPI：捕获相关 API，可选 SPA 静态目录。"""
 
+    hotkeys_lock = threading.Lock()
+    hotkeys_state: HotkeysPayload = load_hotkeys(base_dir=PY_DIR)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         """进程生命周期内启动/停止捕获后台线程。"""
         capture.start_background()
         start_admin_warn_loop()
-        f12_done = threading.Event()
+        hotkey_done = threading.Event()
 
-        def _f12() -> None:
+        def _hotkey_listener() -> None:
             from pynput import keyboard
 
+            def _norm_key(k: object) -> str | None:
+                if isinstance(k, keyboard.KeyCode):
+                    if k.char is None:
+                        return None
+                    ch = k.char
+                    if ch == " ":
+                        return "Space"
+                    if len(ch) == 1:
+                        return ch.upper()
+                    return ch
+                if isinstance(k, keyboard.Key):
+                    name = k.name
+                    if name is None:
+                        return None
+                    # 兼容 function keys: 'f12' -> 'F12'
+                    if name.startswith("f") and name[1:].isdigit():
+                        return name.upper()
+                    # 常见键名首字母大写
+                    if name == "space":
+                        return "Space"
+                    return name[0].upper() + name[1:]
+                return None
+
+            def _is_modifier(k: object) -> bool:
+                return k in (
+                    keyboard.Key.ctrl,
+                    keyboard.Key.ctrl_l,
+                    keyboard.Key.ctrl_r,
+                    keyboard.Key.shift,
+                    keyboard.Key.shift_l,
+                    keyboard.Key.shift_r,
+                    keyboard.Key.alt,
+                    keyboard.Key.alt_l,
+                    keyboard.Key.alt_r,
+                    keyboard.Key.cmd,
+                    keyboard.Key.cmd_l,
+                    keyboard.Key.cmd_r,
+                )
+
+            pressed_mods: set[str] = set()
+
+            def _mods_snapshot() -> dict[str, bool]:
+                return {
+                    "ctrl": ("ctrl" in pressed_mods),
+                    "shift": ("shift" in pressed_mods),
+                    "alt": ("alt" in pressed_mods),
+                    "meta": ("meta" in pressed_mods),
+                }
+
             def on_press(k: object) -> None:
-                if k == keyboard.Key.f12:
+                # 更新修饰键状态
+                if k in (keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
+                    pressed_mods.add("ctrl")
+                    return
+                if k in (keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r):
+                    pressed_mods.add("shift")
+                    return
+                if k in (keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r):
+                    pressed_mods.add("alt")
+                    return
+                if k in (keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r):
+                    pressed_mods.add("meta")
+                    return
+
+                key = _norm_key(k)
+                if key is None:
+                    return
+
+                with hotkeys_lock:
+                    hk = hotkeys_state
+
+                mods = _mods_snapshot()
+
+                def _match(target: HotkeyPayload) -> bool:
+                    if target.key is None or target.key == "":
+                        return False
+                    if target.key != key:
+                        return False
+                    return (
+                        bool(target.ctrl) == bool(mods["ctrl"])
+                        and bool(target.shift) == bool(mods["shift"])
+                        and bool(target.alt) == bool(mods["alt"])
+                        and bool(target.meta) == bool(mods["meta"])
+                    )
+
+                if _match(hk.stop):
                     auto_fish.stop()
                     music.stop()
+                    return
 
-            with keyboard.Listener(on_press=on_press):
-                f12_done.wait()
+                if _match(hk.start):
+                    # 根据当前模式启动对应执行器（与前端切换的 context 一致）
+                    try:
+                        ctx = capture.get_status().capture_context
+                        if ctx == "music":
+                            auto_fish.stop()
+                            music.start()
+                        else:
+                            music.stop()
+                            auto_fish.start()
+                    except Exception:
+                        # 启动失败不影响监听线程
+                        return
 
-        f12_t = threading.Thread(target=_f12, name="f12-stop", daemon=True)
-        f12_t.start()
+            def on_release(k: object) -> None:
+                if k in (keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
+                    pressed_mods.discard("ctrl")
+                    return
+                if k in (keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r):
+                    pressed_mods.discard("shift")
+                    return
+                if k in (keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r):
+                    pressed_mods.discard("alt")
+                    return
+                if k in (keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r):
+                    pressed_mods.discard("meta")
+                    return
+
+            with keyboard.Listener(on_press=on_press, on_release=on_release):
+                hotkey_done.wait()
+
+        hotkey_t = threading.Thread(target=_hotkey_listener, name="global-hotkeys", daemon=True)
+        hotkey_t.start()
         yield
         stop_admin_warn_loop()
-        f12_done.set()
-        f12_t.join(timeout=2.0)
+        hotkey_done.set()
+        hotkey_t.join(timeout=2.0)
         auto_fish.stop()
         music.stop()
         capture.stop_background()
@@ -108,6 +228,21 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.get("/api/hotkeys")
+    def get_hotkeys() -> dict[str, Any]:
+        """读取全局快捷键配置（由后端主导，持久化到 python/hotkeys.json）。"""
+        with hotkeys_lock:
+            return hotkeys_state.model_dump()
+
+    @app.post("/api/hotkeys")
+    def set_hotkeys(body: HotkeysPayload) -> dict[str, Any]:
+        """更新全局快捷键配置，并持久化到 python/hotkeys.json。"""
+        nonlocal hotkeys_state
+        with hotkeys_lock:
+            hotkeys_state = body
+            save_hotkeys(base_dir=PY_DIR, hotkeys=hotkeys_state)
+            return hotkeys_state.model_dump()
 
     @app.get("/api/capture/status")
     def cap_status() -> dict[str, Any]:

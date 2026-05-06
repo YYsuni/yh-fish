@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Hotkey, HotkeyId } from '../../lib/hotkeys'
-import { formatHotkey, getHotkeys, setHotkey } from '../../lib/hotkeys'
+import { emitHotkeysUpdated, formatHotkey } from '../../lib/hotkeys'
+import { getHotkeys, postHotkeys } from '../../lib/api-client'
 import { HotkeyCaptureModal } from './hotkey-capture-modal'
 import { Modal } from '../ui/modal'
 
@@ -13,11 +14,26 @@ export function HotkeySettingsModal({ open, onClose }: { open: boolean; onClose:
 	const [version, setVersion] = useState(0)
 	const [captureId, setCaptureId] = useState<HotkeyId | null>(null)
 	const [captureInitial, setCaptureInitial] = useState<Hotkey>({ key: null, ctrl: false, shift: false, alt: false, meta: false })
+	const [hotkeysRemote, setHotkeysRemote] = useState<Record<HotkeyId, Hotkey>>({
+		start: { key: null, ctrl: false, shift: false, alt: false, meta: false },
+		stop: { key: 'F12', ctrl: false, shift: false, alt: false, meta: false }
+	})
+
+	useEffect(() => {
+		if (!open) return
+		void (async () => {
+			try {
+				const hk = await getHotkeys()
+				setHotkeysRemote(hk)
+			} catch (e) {
+				console.error(e)
+			}
+		})()
+	}, [open, version])
 
 	const hotkeys = useMemo(() => {
-		void version
-		return getHotkeys()
-	}, [version])
+		return hotkeysRemote
+	}, [hotkeysRemote])
 
 	const openCapture = (id: HotkeyId) => {
 		setCaptureId(id)
@@ -52,9 +68,19 @@ export function HotkeySettingsModal({ open, onClose }: { open: boolean; onClose:
 					initialValue={captureInitial}
 					onCancel={() => setCaptureId(null)}
 					onConfirm={next => {
-						setHotkey(captureId, next)
-						setCaptureId(null)
-						setVersion(v => v + 1)
+						void (async () => {
+							try {
+								const merged = { ...hotkeysRemote, [captureId]: next }
+								await postHotkeys(merged)
+								setHotkeysRemote(merged)
+								emitHotkeysUpdated(merged)
+							} catch (e) {
+								console.error(e)
+							} finally {
+								setCaptureId(null)
+								setVersion(v => v + 1)
+							}
+						})()
 					}}
 				/>
 			) : null}
