@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Switch } from '../ui/switch'
 import { postAutoFishSellOnNoBait } from '../../lib/api-client'
 import type { AutoFishRemote } from './auto-fish-controls'
+import { AutoFishLogicStatePicker } from './auto-fish-logic-state'
 
 export function AutoFishSettings({ fish }: { fish: AutoFishRemote }) {
 	const sellFishOnNoBait = fish.status?.sell_fish_on_no_bait ?? true
@@ -45,6 +46,8 @@ export function AutoFishSettings({ fish }: { fish: AutoFishRemote }) {
 				</svg>
 				<span>{`钓鱼 -> (无鱼饵) -> ${sellFishOnNoBait ? '一键卖鱼 -> ' : ''}鱼饵 -> 钓鱼`}</span>
 			</p>
+
+			<AutoFishLogicStatePicker fish={fish} />
 		</>
 	)
 }
