@@ -1,0 +1,15 @@
+{
+	"page_priority": ["店长特供页面"],
+	"pages": [
+		{
+			"id": "manager-supply",
+			"label": "店长特供页面",
+			"features": [
+				{
+					"file": "营业额.png",
+					"region": [1021, 104, 68, 34]
+				}
+			]
+		}
+	]
+}

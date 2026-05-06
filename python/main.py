@@ -11,9 +11,10 @@ from pathlib import Path
 import uvicorn
 import webview
 
-from auto_fish_executor import AutoFishExecutor
+from features.auto_fish_executor import AutoFishExecutor
 from capture_service import CaptureService
-from music_executor import MusicExecutor
+from features.manager_executor import ManagerExecutor
+from features.music_executor import MusicExecutor
 from server import create_app
 
 
@@ -75,7 +76,8 @@ def main(argv: list[str] | None = None) -> None:
     cap = CaptureService()
     fish = AutoFishExecutor(cap)
     music = MusicExecutor(cap)
-    app = create_app(capture=cap, auto_fish=fish, music=music, serve_static=static, dist_dir=d)
+    manager = ManagerExecutor(cap)
+    app = create_app(capture=cap, auto_fish=fish, music=music, manager=manager, serve_static=static, dist_dir=d)
 
     srv = uvicorn.Server(uvicorn.Config(app, host=args.host, port=args.port, log_level="info", access_log=False))
     threading.Thread(target=srv.run, daemon=True).start()

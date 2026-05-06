@@ -84,3 +84,4 @@ def compute_music_drum_debug(cropped_rgb: Image.Image) -> dict[str, Any]:
         )
 
     return {"items": items}
+

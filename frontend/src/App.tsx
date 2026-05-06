@@ -48,6 +48,16 @@ function AppWorkspaceShell() {
 					}}>
 					超强音
 				</div>
+				<div
+					className={clsx('tab', workspace === 'manager' && 'active')}
+					onClick={() => setWorkspace('manager')}
+					role='tab'
+					tabIndex={0}
+					onKeyDown={e => {
+						if (e.key === 'Enter' || e.key === ' ') setWorkspace('manager')
+					}}>
+					店长特供
+				</div>
 			</div>
 
 			<main

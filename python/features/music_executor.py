@@ -204,3 +204,4 @@ class MusicExecutor:
                 _log.exception("music page handler failed page_id=%s", page_id)
 
             time.sleep(DRUM_POLL_S if page_id == "drum" else DEFAULT_POLL_S)
+

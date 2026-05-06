@@ -11,7 +11,7 @@ export type PageMatchPayload = {
 /** 与后端 `capture_pipeline_debug.PIPELINE_TIMING_KEYS` 对齐的毫秒耗时（缺省键按 0） */
 export type PipelineMsPayload = Record<string, number>
 
-export type CaptureContextId = 'fish' | 'music'
+export type CaptureContextId = 'fish' | 'music' | 'manager'
 
 export type CaptureStatusResponse = {
 	ok: boolean
@@ -138,6 +138,29 @@ export function postMusicStart() {
 
 export function postMusicStop() {
 	return fetchJson<{ running: boolean }>('/api/music/stop', {
+		method: 'POST',
+		body: JSON.stringify({})
+	})
+}
+
+export type ManagerStatusResponse = {
+	running: boolean
+	last_page_id: string | null
+}
+
+export function getManagerStatus() {
+	return fetchJson<ManagerStatusResponse>('/api/manager/status')
+}
+
+export function postManagerStart() {
+	return fetchJson<{ running: boolean; started: boolean }>('/api/manager/start', {
+		method: 'POST',
+		body: JSON.stringify({})
+	})
+}
+
+export function postManagerStop() {
+	return fetchJson<{ running: boolean }>('/api/manager/stop', {
 		method: 'POST',
 		body: JSON.stringify({})
 	})

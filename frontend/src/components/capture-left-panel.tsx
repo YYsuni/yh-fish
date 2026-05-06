@@ -3,11 +3,13 @@ import { Switch } from './ui/switch'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAutoFishStatus } from '../hooks/use-auto-fish-status'
 import { useMusicStatus } from '../hooks/use-music-status'
+import { useManagerStatus } from '../hooks/use-manager-status'
 import { AutoFishControls } from './auto-fish/auto-fish-controls'
 import { AutoFishSettings } from './auto-fish/auto-fish-settings'
 import { IconSettings } from './icons/icon-settings'
 import { HotkeySettingsModal } from './hotkeys/hotkey-settings-modal'
 import { MusicSettings } from './music/music-settings'
+import { ManagerSettings } from './manager/manager-settings'
 import { FPS_MAX, FPS_MIN, MATCH_TH_MAX, MATCH_TH_MIN, useCaptureSession } from './capture-session-context'
 import type { WorkspaceTabId } from './workspace-types'
 
@@ -34,6 +36,7 @@ export function CaptureLeftPanel({ workspace }: { workspace: WorkspaceTabId }) {
 
 	const fish = useAutoFishStatus()
 	const music = useMusicStatus()
+	const manager = useManagerStatus()
 	const [settingsOpen, setSettingsOpen] = useState(false)
 
 	return (
@@ -95,7 +98,11 @@ export function CaptureLeftPanel({ workspace }: { workspace: WorkspaceTabId }) {
 
 				{workspace === 'fish' ? <AutoFishSettings fish={fish} /> : null}
 
-				{workspace === 'fish' ? <AutoFishControls fish={fish} /> : <MusicSettings music={music} />}
+				{workspace === 'fish' ? <AutoFishControls fish={fish} /> : null}
+
+				{workspace === 'music' ? <MusicSettings music={music} /> : null}
+
+				{workspace === 'manager' ? <ManagerSettings manager={manager} /> : null}
 			</div>
 
 			<HotkeySettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />

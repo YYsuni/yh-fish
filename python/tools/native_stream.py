@@ -124,7 +124,6 @@ class WgcHwndStreamer:
                 def on_frame_arrived(frame, _internal_capture_control):  # noqa: F841
                     """新帧到达：按最小间隔将 BGRA 缓冲转为 JPEG 写入 `_latest`。"""
                     if not first_frame_logged[0]:
-                        msg_out(f"捕获第一帧成功 hwnd: {hwnd}")
                         first_frame_logged[0] = True
                     now = time.monotonic()
                     if (now - last_encode[0]) * 1000.0 < min_interval_ms:
@@ -147,7 +146,7 @@ class WgcHwndStreamer:
                 self._cap = cap
                 self._control = cap.start_free_threaded()
                 self._active_hwnd = hwnd
-                msg_out(f"启动WGC成功 hwnd: {hwnd}")
+                msg_out(f"启动WGC成功")
                 return
             except Exception:
                 if border_off:

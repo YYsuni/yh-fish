@@ -20,8 +20,8 @@ from tools.capture_pipeline_debug import (
     merge_pipeline_timings,
     perf_elapsed_ms,
 )
-from tools.auto_fish_page_match import AUTO_FISH_PAGES_JSON, MUSIC_PAGES_JSON
-from tools.music_drum_match import compute_music_drum_debug
+from features.auto_fish_page_match import AUTO_FISH_PAGES_JSON, MANAGER_PAGES_JSON, MUSIC_PAGES_JSON
+from features.music_drum_match import compute_music_drum_debug
 from tools.page_template_match import PageMatchResult, PageTemplateMatcher, run_reeling_bar_templates
 from tools.window_capture import WGC_SNAPSHOT_MARGIN_BOTTOM_PX, WGC_SNAPSHOT_MARGIN_LR_PX
 
@@ -54,6 +54,7 @@ LIVE_FPS_WINDOW_S = 1.0
 # 切换 capture_context 时写入的默认匹配阈值（与前端滑条 reset 对齐）
 FISH_PAGE_MATCH_THRESHOLD_DEFAULT = 0.7
 MUSIC_PAGE_MATCH_THRESHOLD_DEFAULT = 0.4
+MANAGER_PAGE_MATCH_THRESHOLD_DEFAULT = 0.7
 
 _placeholder_preview_cache: bytes | None = None
 
@@ -153,7 +154,7 @@ def _encode_cropped_to_preview(cropped: Image.Image) -> tuple[bytes, int, int]:
     return buf.getvalue(), cw, ch
 
 
-CaptureContextId = Literal["fish", "music"]
+CaptureContextId = Literal["fish", "music", "manager"]
 
 
 @dataclass
@@ -206,6 +207,7 @@ class CaptureService:
         self._page_match: dict[str, object] | None = None
         self._matcher_auto_fish = PageTemplateMatcher(AUTO_FISH_PAGES_JSON)
         self._matcher_music = PageTemplateMatcher(MUSIC_PAGES_JSON)
+        self._matcher_manager = PageTemplateMatcher(MANAGER_PAGES_JSON)
         self._capture_context: CaptureContextId = "fish"
         self._pipeline_ms: dict[str, float] = empty_pipeline_timings()
         self._last_cropped_rgb: Image.Image | None = None
@@ -247,11 +249,12 @@ class CaptureService:
         """切换页面匹配数据源，并重置匹配阈值为该模式的默认值（钓鱼 0.7 / 超强音 0.4）。"""
         with self._lock:
             self._capture_context = context
-        default_th = (
-            FISH_PAGE_MATCH_THRESHOLD_DEFAULT
-            if context == "fish"
-            else MUSIC_PAGE_MATCH_THRESHOLD_DEFAULT
-        )
+        if context == "music":
+            default_th = MUSIC_PAGE_MATCH_THRESHOLD_DEFAULT
+        elif context == "manager":
+            default_th = MANAGER_PAGE_MATCH_THRESHOLD_DEFAULT
+        else:
+            default_th = FISH_PAGE_MATCH_THRESHOLD_DEFAULT
         self.set_page_match_threshold(default_th)
         return context
 
@@ -414,7 +417,12 @@ class CaptureService:
                         t0 = time.perf_counter()
                         with self._lock:
                             ctx = self._capture_context
-                        matcher = self._matcher_auto_fish if ctx == "fish" else self._matcher_music
+                        if ctx == "music":
+                            matcher = self._matcher_music
+                        elif ctx == "manager":
+                            matcher = self._matcher_manager
+                        else:
+                            matcher = self._matcher_auto_fish
                         pm = matcher.match(cropped)
                         partial["template_match_ms"] = perf_elapsed_ms(t0)
 

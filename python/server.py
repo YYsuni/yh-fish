@@ -16,9 +16,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from auto_fish_executor import AutoFishExecutor
+from features.auto_fish_executor import AutoFishExecutor
 from capture_service import CaptureService
-from music_executor import MusicExecutor
+from features.manager_executor import ManagerExecutor
+from features.music_executor import MusicExecutor
 from tools.exec_msg import snapshot as msg_snapshot, start_admin_warn_loop, stop_admin_warn_loop
 from tools.hotkeys import HotkeyPayload, HotkeysPayload, load_hotkeys, save_hotkeys
 
@@ -42,7 +43,7 @@ class SetMatchThresholdBody(BaseModel):
 class SetCaptureContextBody(BaseModel):
     """POST `/api/capture/context`：切换页面匹配使用的配置（钓鱼 auto_fish/pages.json ↔ 超强音 music/page.json）。"""
 
-    context: Literal["fish", "music"]
+    context: Literal["fish", "music", "manager"]
 
 
 class SetAutoFishLogicBody(BaseModel):
@@ -65,6 +66,7 @@ def create_app(
     capture: CaptureService,
     auto_fish: AutoFishExecutor,
     music: MusicExecutor,
+    manager: ManagerExecutor,
     serve_static: bool,
     dist_dir: Path,
 ) -> FastAPI:
@@ -171,6 +173,7 @@ def create_app(
                 if _match(hk.stop):
                     auto_fish.stop()
                     music.stop()
+                    manager.stop()
                     return
 
                 if _match(hk.start):
@@ -179,9 +182,15 @@ def create_app(
                         ctx = capture.get_status().capture_context
                         if ctx == "music":
                             auto_fish.stop()
+                            manager.stop()
                             music.start()
+                        elif ctx == "manager":
+                            auto_fish.stop()
+                            music.stop()
+                            manager.start()
                         else:
                             music.stop()
+                            manager.stop()
                             auto_fish.start()
                     except Exception:
                         # 启动失败不影响监听线程
@@ -212,6 +221,7 @@ def create_app(
         hotkey_t.join(timeout=2.0)
         auto_fish.stop()
         music.stop()
+        manager.stop()
         capture.stop_background()
 
     app = FastAPI(title="yh-fish", version="0.1.0", lifespan=lifespan)
@@ -314,12 +324,30 @@ def create_app(
     def music_start() -> dict[str, object]:
         """启动超强音 ROI 匹配线程；会先停止自动钓鱼。"""
         auto_fish.stop()
+        manager.stop()
         return music.start()
 
     @app.post("/api/music/stop")
     def music_stop() -> dict[str, object]:
         """停止超强音线程。"""
         return music.stop()
+
+    @app.get("/api/manager/status")
+    def manager_status() -> dict[str, object]:
+        """店长特供执行器是否在跑、最近一次识别到的 page_id。"""
+        return manager.status_dict()
+
+    @app.post("/api/manager/start")
+    def manager_start() -> dict[str, object]:
+        """启动店长特供线程；会先停止其他执行器。"""
+        auto_fish.stop()
+        music.stop()
+        return manager.start()
+
+    @app.post("/api/manager/stop")
+    def manager_stop() -> dict[str, object]:
+        """停止店长特供线程。"""
+        return manager.stop()
 
     @app.get("/api/msg/log")
     def msg_log() -> dict[str, Any]:
