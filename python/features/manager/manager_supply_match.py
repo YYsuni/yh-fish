@@ -24,16 +24,36 @@ _log = logging.getLogger(__name__)
 # 多实例模板匹配仅在本线程内节流执行，避免占用捕获管线帧循环。
 SUPPLY_MULTIMATCH_MIN_INTERVAL_S = 0.12
 
-# --- 店长特供页内饮品图标多实例识别（整窗未裁坐标 region；与 page.json 无关，后续可整理配置）---
-_MANAGER_SUPPLY_ICON_TEMPLATES: tuple[tuple[str, str], ...] = (
-    ("烤椰拿铁1.png", "烤椰拿铁"),
-    ("烤椰拿铁2.png", "烤椰拿铁"),
-    ("冰摩卡1.png", "冰摩卡"),
-    ("冰摩卡2.png", "冰摩卡"),
+# --- 店长特供页内物品图标多实例识别（整窗未裁坐标 region；与 page.json 无关，后续可整理配置）---
+# tuple: (template_file, display_name, item_type)
+_MANAGER_SUPPLY_ICON_TEMPLATES: tuple[tuple[str, str, str], ...] = (
+    # 饮料
+    ("烤椰拿铁1.png", "烤椰拿铁", "饮料"),
+    ("烤椰拿铁2.png", "烤椰拿铁", "饮料"),
+    ("冰摩卡1.png", "冰摩卡", "饮料"),
+    ("冰摩卡2.png", "冰摩卡", "饮料"),
+    # 甜品
+    ("苹果派1.png", "苹果派", "甜品"),
+    ("苹果派2.png", "苹果派", "甜品"),
+    # 主食
+    ("西红柿煎蛋可颂1.png", "西红柿煎蛋可颂", "主食"),
+    ("西红柿煎蛋可颂2.png", "西红柿煎蛋可颂", "主食"),
+    ("金枪鱼三明治1.png", "金枪鱼三明治", "主食"),
+    ("金枪鱼三明治2.png", "金枪鱼三明治", "主食"),
 )
 _MANAGER_SUPPLY_ICON_REGION_PRECROP = (166.0, 121.0, 769.0, 208.0)
 _MANAGER_IMG_DIR = MANAGER_PAGES_JSON.parent
 _ITEM_NAME_FALLBACK = "店长特供"
+
+# --- 供后续「空闲状态」匹配用（每个状态对应不同 region；位置你后续手写；先占位）---
+# tuple: (template_file, status_name, region_precrop_xywh)
+_MANAGER_SUPPLY_STATUS_TEMPLATES: tuple[tuple[str, str, tuple[float, float, float, float]], ...] = (
+    ("烤箱-空.png", "烤箱-空", (0.0, 0.0, 0.0, 0.0)),
+    ("菜盘右-空.png", "菜盘右-空", (0.0, 0.0, 0.0, 0.0)),
+    ("菜盘左-空.png", "菜盘左-空", (0.0, 0.0, 0.0, 0.0)),
+    ("切菜板-空.png", "切菜板-空", (0.0, 0.0, 0.0, 0.0)),
+    ("中盘-空.png", "中盘-空", (0.0, 0.0, 0.0, 0.0)),
+)
 
 _COFFEE_BACK_EMPTY_FILE = "咖啡后台-空.png"
 _COFFEE_BACK_EMPTY_REGION_PRECROP = (1119.92, 659.71, 141.9, 101.2)
@@ -61,7 +81,7 @@ _CUP_PLATE_TEMPLATES: tuple[tuple[str, str], ...] = (
 def _supply_display_name_order() -> list[str]:
     """按模板配置的顺序生成展示用饮品名列表（去重保序）。"""
     seen: list[str] = []
-    for _fn, disp in _MANAGER_SUPPLY_ICON_TEMPLATES:
+    for _fn, disp, _tp in _MANAGER_SUPPLY_ICON_TEMPLATES:
         if disp not in seen:
             seen.append(disp)
     return seen
@@ -141,7 +161,7 @@ def _run_manager_supply_icon_multimatch(cropped_rgb: Image.Image, *, threshold: 
     t0 = time.perf_counter()
     parts: list[dict[str, object]] = []
     found = False
-    for fn, disp_name in _MANAGER_SUPPLY_ICON_TEMPLATES:
+    for fn, disp_name, item_type in _MANAGER_SUPPLY_ICON_TEMPLATES:
         tpl = _MANAGER_IMG_DIR / fn
         if not tpl.is_file():
             continue
@@ -157,6 +177,7 @@ def _run_manager_supply_icon_multimatch(cropped_rgb: Image.Image, *, threshold: 
         for it in raw:
             row = dict(it)
             row["name"] = disp_name
+            row["type"] = item_type
             row["template_file"] = fn
             parts.append(row)
     ms = (time.perf_counter() - t0) * 1000.0
@@ -177,7 +198,7 @@ def _run_manager_supply_icon_multimatch(cropped_rgb: Image.Image, *, threshold: 
 
 
 def _manager_aux_region_fields(cropped_rgb: Image.Image, *, threshold: float) -> dict[str, object]:
-    """补充店长特供页的辅助区域识别字段（咖啡后台条、咖啡机状态、杯子盘状态）。"""
+    """补充店长特供页的辅助区域识别字段（咖啡后台条、咖啡机状态、杯子盘状态、各工作台空闲状态）。"""
     out: dict[str, object] = {}
     cb_path = _MANAGER_IMG_DIR / _COFFEE_BACK_EMPTY_FILE
     cb_score = match_template_score_in_precrop_roi(cropped_rgb, cb_path, _COFFEE_BACK_EMPTY_REGION_PRECROP)
@@ -217,9 +238,11 @@ def _manager_aux_region_fields(cropped_rgb: Image.Image, *, threshold: float) ->
     out["cup_plate_similarities"] = {k: round(v, 4) for k, v in sims.items()}
     if best_s < 0:
         out["cup_plate"] = "未知"
+        out["cup_plate_similarity"] = None
         out["cup_plate_peak"] = None
     elif best_s >= float(threshold):
         out["cup_plate"] = best_label
+        out["cup_plate_similarity"] = round(float(best_s), 4)
         if best_raw is not None:
             bx, by, bw, bh = best_raw[0], best_raw[1], best_raw[2], best_raw[3]
             out["cup_plate_peak"] = {
@@ -234,7 +257,28 @@ def _manager_aux_region_fields(cropped_rgb: Image.Image, *, threshold: float) ->
             out["cup_plate_peak"] = None
     else:
         out["cup_plate"] = "未知"
+        out["cup_plate_similarity"] = round(float(best_s), 4)
         out["cup_plate_peak"] = None
+
+    # 各工作台「空闲状态」：每个模板对应不同 region
+    status_similarities: dict[str, float | None] = {}
+    status_values: dict[str, str] = {}
+    for fn, status_name, region in _MANAGER_SUPPLY_STATUS_TEMPLATES:
+        p = _MANAGER_IMG_DIR / fn
+        if not p.is_file():
+            status_similarities[status_name] = None
+            status_values[status_name] = "未知"
+            continue
+        s0 = match_template_score_in_precrop_roi(cropped_rgb, p, region)
+        if s0 is None:
+            status_similarities[status_name] = None
+            status_values[status_name] = "未知"
+            continue
+        s = float(s0)
+        status_similarities[status_name] = round(s, 4)
+        status_values[status_name] = "空" if s >= float(threshold) else "有"
+    out["supply_status_similarities"] = status_similarities
+    out["supply_status"] = status_values
 
     # 分数：五角星多实例匹配（允许多个）
     star_path = _MANAGER_IMG_DIR / _SCORE_STAR_FILE
@@ -274,7 +318,11 @@ def gather_manager_supply_tick(
     cb = mdd.get("coffee_back_bar")
     cbs = mdd.get("coffee_back_bar_similarity")
     cp = mdd.get("cup_plate")
+    cps = mdd.get("cup_plate_similarity")
     cms = mdd.get("coffee_machine_status")
+    cmss = mdd.get("coffee_machine_similarity")
+    supply_status = mdd.get("supply_status")
+    supply_status_similarities = mdd.get("supply_status_similarities")
     score_hits = mdd.get("score")
     score_items: list[dict[str, object]] = []
     if isinstance(score_hits, list):
@@ -285,6 +333,31 @@ def gather_manager_supply_tick(
     cb_v = str(cb) if cb is not None else "—"
     cp_v = str(cp) if cp is not None else "—"
     coffee_machine_status = str(cms) if cms is not None else "—"
+    supply_status_v: dict[str, str] = {}
+    if isinstance(supply_status, dict):
+        for k, v in supply_status.items():
+            supply_status_v[str(k)] = str(v)
+    supply_status_sims_v: dict[str, float | None] = {}
+    if isinstance(supply_status_similarities, dict):
+        for k, v in supply_status_similarities.items():
+            kk = str(k)
+            if v is None:
+                supply_status_sims_v[kk] = None
+            elif isinstance(v, (int, float)):
+                supply_status_sims_v[kk] = float(v)
+            else:
+                supply_status_sims_v[kk] = None
+
+    # 把旧状态也并入统一的 supply_status 结构，便于上层只处理一套字段
+    supply_status_v.setdefault("咖啡后台条", cb_v)
+    supply_status_v.setdefault("咖啡机", coffee_machine_status)
+    supply_status_v.setdefault("杯子盘", cp_v)
+    if isinstance(cbs, (int, float)):
+        supply_status_sims_v.setdefault("咖啡后台条", float(cbs))
+    if isinstance(cmss, (int, float)):
+        supply_status_sims_v.setdefault("咖啡机", float(cmss))
+    if isinstance(cps, (int, float)):
+        supply_status_sims_v.setdefault("杯子盘", float(cps))
     return ManagerSupplyTickSnapshot(
         monotonic=monotonic,
         hwnd=hwnd,
@@ -294,6 +367,8 @@ def gather_manager_supply_tick(
         cb_s=cb_s,
         counts=counts,
         score=score_items,
+        supply_status=supply_status_v,
+        supply_status_similarities=supply_status_sims_v,
     )
 
 

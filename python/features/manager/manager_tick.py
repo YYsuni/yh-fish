@@ -43,3 +43,5 @@ class ManagerSupplyTickSnapshot:
     cb_s: str
     counts: dict[str, int]
     score: list[dict[str, object]]
+    supply_status: dict[str, str]
+    supply_status_similarities: dict[str, float | None]

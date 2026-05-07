@@ -51,9 +51,13 @@ def execute_manager_supply_tick(
             game_input.send_left_click_physical(snapshot.hwnd, x, y, hover_dwell_s=0.1, hold_s=0.1)
 
     if cooldown.try_fire("manager:manager-supply:log", 2.0, snapshot.monotonic):
+        status_txt = ""
+        if isinstance(snapshot.supply_status, dict) and snapshot.supply_status:
+            status_txt = "；" + "，".join(f"{k}={v}" for k, v in snapshot.supply_status.items())
         exec_msg.msg_out(
             f"店长特供页面：{_format_supply_counts_zh(snapshot.counts)}；"
             f"分数={len(snapshot.score)}；"
+            f"{status_txt}"
             # f"咖啡后台={snapshot.cb_v}；"
             # f"咖啡机={snapshot.coffee_machine_status}；"
             # f"杯子盘={snapshot.cp_v}"
