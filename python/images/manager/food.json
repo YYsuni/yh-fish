@@ -1,0 +1,27 @@
+[
+	{
+		"name": "烤椰拿铁",
+		"item_type": "饮料",
+		"images": ["烤椰拿铁1.png", "烤椰拿铁2.png"]
+	},
+	{
+		"name": "冰摩卡",
+		"item_type": "饮料",
+		"images": ["冰摩卡1.png", "冰摩卡2.png"]
+	},
+	{
+		"name": "苹果派",
+		"item_type": "甜品",
+		"images": ["苹果派1.png", "苹果派2.png"]
+	},
+	{
+		"name": "西红柿煎蛋可颂",
+		"item_type": "主食",
+		"images": ["西红柿煎蛋可颂1.png", "西红柿煎蛋可颂2.png"]
+	},
+	{
+		"name": "金枪鱼三明治",
+		"item_type": "主食",
+		"images": ["金枪鱼三明治1.png", "金枪鱼三明治2.png"]
+	}
+]

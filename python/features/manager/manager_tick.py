@@ -37,11 +37,7 @@ class ManagerSupplyTickSnapshot:
 
     monotonic: float
     hwnd: int
-    cb_v: str
-    coffee_machine_status: str
-    cp_v: str
-    cb_s: str
-    counts: dict[str, int]
-    score: list[dict[str, object]]
-    supply_status: dict[str, str]
-    supply_status_similarities: dict[str, float | None]
+    # foods：每项为 (中文名, 类型, 数量)，顺序与 ``food.json`` 一致
+    foods: list[tuple[str, str, int]]
+    # kitchen：槽位中文名 -> 状态文案或数量
+    kitchen: dict[str, str | int]

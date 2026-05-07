@@ -1,0 +1,59 @@
+[
+	{
+		"name": "烤箱",
+		"status": [{ "status_name": "空", "template_file": "烤箱-空.png" }],
+		"region": [781, 715, 143, 43]
+	},
+	{
+		"name": "菜盘左",
+		"status": [{ "status_name": "空", "template_file": "菜盘左-空.png" }],
+		"region": [0, 531, 190, 104]
+	},
+	{
+		"name": "菜盘右",
+		"status": [{ "status_name": "空", "template_file": "菜盘右-空.png" }],
+		"region": [325, 537, 208, 97]
+	},
+	{
+		"name": "切菜板",
+		"status": [{ "status_name": "空", "template_file": "切菜板-空.png" }],
+		"region": [207, 664, 167, 82]
+	},
+
+	{
+		"name": "主食盘",
+		"status": [
+			{ "status_name": "空", "template_file": "主食盘-空.png" },
+			{ "status_name": "牛角包", "template_file": "主食盘-牛角包.png" },
+			{ "status_name": "面包片", "template_file": "主食盘-面包片.png" }
+		],
+		"region": [196, 537, 135, 87]
+	},
+
+	{
+		"name": "甜品盘",
+		"status": [{ "status_name": "空", "template_file": "甜品盘-空.png" }],
+		"region": [591, 561, 102, 49]
+	},
+	{
+		"name": "饮料盘",
+		"status": [
+			{ "status_name": "空", "template_file": "饮料盘-空.png" },
+			{ "status_name": "玻璃杯", "template_file": "饮料盘-玻璃杯.png" },
+			{ "status_name": "玻璃水", "template_file": "饮料盘-玻璃水.png" },
+			{ "status_name": "咖啡杯", "template_file": "饮料盘-咖啡杯.png" },
+			{ "status_name": "咖啡", "template_file": "饮料盘-咖啡.png" }
+		],
+		"region": [954.87, 545.13, 113.25, 77.81]
+	},
+	{
+		"name": "咖啡后台",
+		"status": [{ "status_name": "空", "template_file": "咖啡后台-空.png" }],
+		"region": [1119.92, 659.71, 141.9, 101.2]
+	},
+	{
+		"name": "咖啡机",
+		"status": [{ "status_name": "空", "template_file": "咖啡机-空闲.png" }],
+		"region": [1023, 676, 79, 80]
+	}
+]

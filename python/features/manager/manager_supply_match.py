@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
-"""店长特供页 ``manager-supply``：模板匹配、槽位跟踪、上菜与咖啡后台点击。"""
+"""店长特供页 ``manager-supply``：按 ``food.json`` / ``kitchen.json`` 做图标与厨房槽位识别；满意度星星写在本模块常量中。"""
 
 from __future__ import annotations
 
+import json
 import logging
 import time
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from PIL import Image
@@ -14,100 +18,129 @@ from features.manager.manager_tick import ManagerSupplyTickSnapshot
 from tools.page_template_match import (
     _match_template_in_precrop_roi_raw,
     match_template_multi_in_precrop_roi,
-    match_template_score_in_precrop_roi,
 )
-
-import tools.exec_msg as exec_msg
 
 _log = logging.getLogger(__name__)
 
-# 多实例模板匹配仅在本线程内节流执行，避免占用捕获管线帧循环。
 SUPPLY_MULTIMATCH_MIN_INTERVAL_S = 0.12
+MANAGER_SUPPLY_PAGE_ID = "manager-supply"
 
-# --- 店长特供页内物品图标多实例识别（整窗未裁坐标 region；与 page.json 无关，后续可整理配置）---
-# tuple: (template_file, display_name, item_type)
-_MANAGER_SUPPLY_ICON_TEMPLATES: tuple[tuple[str, str, str], ...] = (
-    # 饮料
-    ("烤椰拿铁1.png", "烤椰拿铁", "饮料"),
-    ("烤椰拿铁2.png", "烤椰拿铁", "饮料"),
-    ("冰摩卡1.png", "冰摩卡", "饮料"),
-    ("冰摩卡2.png", "冰摩卡", "饮料"),
-    # 甜品
-    ("苹果派1.png", "苹果派", "甜品"),
-    ("苹果派2.png", "苹果派", "甜品"),
-    # 主食
-    ("西红柿煎蛋可颂1.png", "西红柿煎蛋可颂", "主食"),
-    ("西红柿煎蛋可颂2.png", "西红柿煎蛋可颂", "主食"),
-    ("金枪鱼三明治1.png", "金枪鱼三明治", "主食"),
-    ("金枪鱼三明治2.png", "金枪鱼三明治", "主食"),
-)
-_MANAGER_SUPPLY_ICON_REGION_PRECROP = (166.0, 121.0, 769.0, 208.0)
-_MANAGER_IMG_DIR = MANAGER_PAGES_JSON.parent
-_ITEM_NAME_FALLBACK = "店长特供"
+_IMG = MANAGER_PAGES_JSON.parent
+_FOOD_JSON = _IMG / "food.json"
+_KITCHEN_JSON = _IMG / "kitchen.json"
 
-# --- 供后续「空闲状态」匹配用（每个状态对应不同 region；位置你后续手写；先占位）---
-# tuple: (template_file, status_name, region_precrop_xywh)
-_MANAGER_SUPPLY_STATUS_TEMPLATES: tuple[tuple[str, str, tuple[float, float, float, float]], ...] = (
-    ("烤箱-空.png", "烤箱-空", (0.0, 0.0, 0.0, 0.0)),
-    ("菜盘右-空.png", "菜盘右-空", (0.0, 0.0, 0.0, 0.0)),
-    ("菜盘左-空.png", "菜盘左-空", (0.0, 0.0, 0.0, 0.0)),
-    ("切菜板-空.png", "切菜板-空", (0.0, 0.0, 0.0, 0.0)),
-    ("中盘-空.png", "中盘-空", (0.0, 0.0, 0.0, 0.0)),
-)
+# 饮品订单图标区（整窗未裁 [x,y,w,h]）
+_ICON_REGION = (166.0, 121.0, 769.0, 208.0)
 
-_COFFEE_BACK_EMPTY_FILE = "咖啡后台-空.png"
-_COFFEE_BACK_EMPTY_REGION_PRECROP = (1119.92, 659.71, 141.9, 101.2)
+# 满意度星星：与订单区同为 ROI 内多数计数；不配 kitchen.json
+_STAR_KITCHEN_KEY = "星星"
+_STAR_REGION_PRECROP = (1203.0, 150.0, 37.0, 120.0)
+_STAR_TEMPLATE_FILE = "五角星.png"
 
-_COFFEE_MACHINE_IDLE_FILE = "咖啡机-空闲.png"
-# 咖啡机状态区域（整窗未裁坐标系 [x,y,w,h]）
-_COFFEE_MACHINE_IDLE_REGION_PRECROP = (1023.0, 676.0, 79.0, 80.0)
-
-_CUP_PLATE_REGION_PRECROP = (954.87, 545.13, 113.25, 77.81)
-_DRINK_AUTOMATION_NAMES: frozenset[str] = frozenset({"烤椰拿铁", "冰摩卡"})
-
-_SCORE_STAR_FILE = "五角星.png"
-# 分数区域（整窗未裁坐标系 [x,y,w,h]）
-_SCORE_STAR_REGION_PRECROP = (1203.0, 150.0, 37.0, 120.0)
-
-_CUP_PLATE_TEMPLATES: tuple[tuple[str, str], ...] = (
-    ("杯子盘-空.png", "空"),
-    ("杯子盘-玻璃杯.png", "玻璃杯"),
-    ("杯子盘-玻璃水.png", "玻璃水"),
-    ("杯子盘-咖啡杯.png", "咖啡杯"),
-    ("杯子盘-咖啡.png", "咖啡"),
-)
+_FALLBACK_NAME = "店长特供"
 
 
-def _supply_display_name_order() -> list[str]:
-    """按模板配置的顺序生成展示用饮品名列表（去重保序）。"""
-    seen: list[str] = []
-    for _fn, disp, _tp in _MANAGER_SUPPLY_ICON_TEMPLATES:
-        if disp not in seen:
-            seen.append(disp)
-    return seen
+def _load_json_doc(path: Path) -> Any:
+    """读取 JSON 文件，失败时返回 None 并打日志。"""
+    if not path.is_file():
+        _log.warning("missing json: %s", path)
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        _log.exception("parse json failed: %s", path)
+        return None
 
 
-def _supply_counts_payload(items: list[dict[str, object]]) -> dict[str, int]:
-    """把多实例匹配结果聚合成「饮品名 -> 数量」的统计字典，并按展示顺序输出。"""
-    raw: dict[str, int] = {}
-    for it in items:
-        if not isinstance(it, dict):
+def _parse_food_catalog() -> tuple[tuple[dict[str, Any], ...], frozenset[str]]:
+    """解析 ``food.json``：返回 (行元组, 饮料名集合)。"""
+    raw = _load_json_doc(_FOOD_JSON)
+    rows: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return (), frozenset()
+    for el in raw:
+        if not isinstance(el, dict):
             continue
-        n = str(it.get("name") or "").strip()
-        if not n or n == _ITEM_NAME_FALLBACK:
+        name = el.get("name")
+        itype = el.get("item_type")
+        images = el.get("images")
+        if not isinstance(name, str) or not isinstance(itype, str):
             continue
-        raw[n] = raw.get(n, 0) + 1
-    ordered: dict[str, int] = {}
-    for disp in _supply_display_name_order():
-        ordered[disp] = int(raw.get(disp, 0))
-    for k, v in raw.items():
-        if k not in ordered:
-            ordered[k] = int(v)
-    return ordered
+        if not isinstance(images, list):
+            continue
+        imgs = [str(x) for x in images if isinstance(x, str)]
+        if not imgs:
+            continue
+        rows.append({"name": name.strip(), "item_type": itype.strip(), "images": imgs})
+    drinks = frozenset(r["name"] for r in rows if r["item_type"] == "饮料")
+    return tuple(rows), drinks
+
+
+def _parse_kitchen_catalog() -> tuple[dict[str, Any], ...]:
+    """解析 ``kitchen.json`` 为内部槽位定义（page 式单 ROI 状态）。"""
+    raw = _load_json_doc(_KITCHEN_JSON)
+    out: list[dict[str, Any]] = []
+    if not isinstance(raw, list):
+        return ()
+    for el in raw:
+        if not isinstance(el, dict):
+            continue
+        name = el.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        region = el.get("region")
+        if not isinstance(region, list) or len(region) != 4:
+            continue
+        try:
+            rx, ry, rw, rh = (float(region[0]), float(region[1]), float(region[2]), float(region[3]))
+        except (TypeError, ValueError):
+            continue
+        statuses: list[tuple[str, str]] = []
+        st_raw = el.get("status")
+        if isinstance(st_raw, list):
+            for st in st_raw:
+                if not isinstance(st, dict):
+                    continue
+                sn = st.get("status_name")
+                tf = st.get("template_file")
+                if isinstance(sn, str) and isinstance(tf, str):
+                    statuses.append((sn.strip(), tf.strip()))
+        out.append(
+            {
+                "name": name.strip(),
+                "region": (rx, ry, rw, rh),
+                "statuses": statuses,
+            }
+        )
+    return tuple(out)
+
+
+@dataclass(frozen=True, slots=True)
+class _Catalog:
+    """惰性缓存的配置：食物行、图标模板、厨房槽位。"""
+
+    food_rows: tuple[dict[str, Any], ...]
+    icon_templates: tuple[tuple[str, str, str], ...]
+    kitchen_slots: tuple[dict[str, Any], ...]
+
+
+@lru_cache(maxsize=1)
+def _catalog() -> _Catalog:
+    """构建并缓存 ``food.json`` / ``kitchen.json`` 衍生结构。"""
+    food_rows, drinks = _parse_food_catalog()
+    tpls: list[tuple[str, str, str]] = []
+    for r in food_rows:
+        for fn in r["images"]:
+            tpls.append((fn, r["name"], r["item_type"]))
+    return _Catalog(
+        food_rows=food_rows,
+        icon_templates=tuple(tpls),
+        kitchen_slots=_parse_kitchen_catalog(),
+    )
 
 
 def _iou_xywh(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
-    """计算两个矩形框（xywh）之间的 IoU（交并比）。"""
+    """计算两矩形 IoU。"""
     ax, ay, aw, ah = a
     bx, by, bw, bh = b
     a_x2, a_y2 = ax + aw, ay + ah
@@ -122,15 +155,13 @@ def _iou_xywh(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> flo
     return inter / ua if ua > 0 else 0.0
 
 
-def _nms_supply_hit_dicts(
+def _nms_hits(
     hits: list[dict[str, object]],
     *,
     iou_thresh: float,
     max_keep: int,
 ) -> list[dict[str, object]]:
-    """对匹配命中框做简单 NMS 去重（按 similarity 降序，IoU 超阈值则抑制）。"""
-    if not hits or max_keep <= 0:
-        return []
+    """按 similarity 做 NMS，抑制重叠框。"""
 
     def _box(d: dict[str, object]) -> tuple[int, int, int, int] | None:
         try:
@@ -142,6 +173,8 @@ def _nms_supply_hit_dicts(
         v = d.get("similarity")
         return float(v) if isinstance(v, (int, float)) else 0.0
 
+    if not hits or max_keep <= 0:
+        return []
     ordered = sorted(hits, key=_sim, reverse=True)
     kept: list[dict[str, object]] = []
     for h in ordered:
@@ -156,150 +189,149 @@ def _nms_supply_hit_dicts(
     return kept
 
 
-def _run_manager_supply_icon_multimatch(cropped_rgb: Image.Image, *, threshold: float) -> dict[str, object] | None:
-    """对店长特供页的饮品图标区域做多模板多实例匹配，并返回调试信息与统计。"""
+def _count_icons_by_name(items: list[dict[str, object]]) -> dict[str, int]:
+    """图标命中 -> 展示名数量（排除占位名）。"""
+    raw: dict[str, int] = {}
+    for it in items:
+        n = str(it.get("name") or "").strip()
+        if not n or n == _FALLBACK_NAME:
+            continue
+        raw[n] = raw.get(n, 0) + 1
+    return raw
+
+
+def _foods_rows_from_counts(counts_by_name: dict[str, int]) -> list[tuple[str, str, int]]:
+    """按 ``food.json`` 顺序输出 (中文名, 类型, 数量)；未在表中的匹配名附在末尾。"""
+    cat = _catalog()
+    out: list[tuple[str, str, int]] = []
+    for r in cat.food_rows:
+        name = r["name"]
+        out.append((name, r["item_type"], int(counts_by_name.get(name, 0))))
+    catalog_names = {r["name"] for r in cat.food_rows}
+    for k, v in counts_by_name.items():
+        if k not in catalog_names:
+            out.append((k, "?", int(v)))
+    return out
+
+
+def _binary_slot_fallback(positive_label: str, *, slot_name: str) -> str:
+    """单模板未达阈值：多数槽位 ``空``→``有``；``咖啡机`` 表示空闲的模板未命中则为 ``""``；其余为 ``""``。"""
+    if positive_label == "空":
+        if slot_name == "咖啡机":
+            return ""
+        return "有"
+    return ""
+
+
+def _count_star_instances(cropped_rgb: Image.Image, *, threshold: float) -> int:
+    """满意度星星个数：与 ``_run_icon_multimatch`` 单饮品模板相同参数（ROI 内多数实例 + NMS）。"""
+    p = _IMG / _STAR_TEMPLATE_FILE
+    if not p.is_file():
+        return 0
+    raw = match_template_multi_in_precrop_roi(
+        cropped_rgb,
+        p,
+        _STAR_REGION_PRECROP,
+        threshold=float(threshold),
+        max_matches=12,
+        nms_iou=0.35,
+    )
+    hits = _nms_hits([dict(h) for h in raw if isinstance(h, dict)], iou_thresh=0.35, max_keep=20)
+    return len(hits)
+
+
+def _best_kitchen_status_page_style(
+    cropped_rgb: Image.Image,
+    region: tuple[float, float, float, float],
+    statuses: list[tuple[str, str]],
+    *,
+    threshold: float,
+) -> tuple[str, float] | None:
+    """与 ``page_template_match._eval_page_features`` 一致：仅采纳 similarity≥阈值的模板，再取置信度最高的一条。"""
+    best: tuple[str, float] | None = None
+    th = float(threshold)
+    for label, fn in statuses:
+        p = _IMG / fn
+        if not p.is_file():
+            continue
+        raw = _match_template_in_precrop_roi_raw(cropped_rgb, p, region)
+        if raw is None:
+            continue
+        conf = float(raw[4])
+        if conf < th:
+            continue
+        if best is None or conf > best[1]:
+            best = (label, conf)
+    return best
+
+
+def _match_one_kitchen_slot(
+    cropped_rgb: Image.Image,
+    slot: dict[str, Any],
+    *,
+    threshold: float,
+) -> str:
+    """厨房槽位（json）：单 ROI 单结论，page 式多模板择优。"""
+    region = slot["region"]
+    statuses: list[tuple[str, str]] = slot["statuses"]
+    slot_name = str(slot.get("name", ""))
+
+    if not statuses:
+        return ""
+
+    picked = _best_kitchen_status_page_style(cropped_rgb, region, statuses, threshold=threshold)
+    if picked is not None:
+        return picked[0]
+
+    if len(statuses) == 1:
+        return _binary_slot_fallback(statuses[0][0], slot_name=slot_name)
+    return "未知"
+
+
+def _scan_kitchen_map(cropped_rgb: Image.Image, *, threshold: float) -> dict[str, str]:
+    """遍历 ``kitchen.json`` 槽位，得到 {槽位名: 状态字符串}。"""
+    out: dict[str, str] = {}
+    for slot in _catalog().kitchen_slots:
+        key = str(slot["name"])
+        out[key] = _match_one_kitchen_slot(cropped_rgb, slot, threshold=threshold)
+    return out
+
+
+def _run_icon_multimatch(cropped_rgb: Image.Image, *, threshold: float) -> dict[str, Any]:
+    """订单区多模板多实例匹配，返回 items 与 counts。"""
     t0 = time.perf_counter()
     parts: list[dict[str, object]] = []
-    found = False
-    for fn, disp_name, item_type in _MANAGER_SUPPLY_ICON_TEMPLATES:
-        tpl = _MANAGER_IMG_DIR / fn
-        if not tpl.is_file():
+    ok = False
+    for fn, disp, itype in _catalog().icon_templates:
+        p = _IMG / fn
+        if not p.is_file():
             continue
-        found = True
+        ok = True
         raw = match_template_multi_in_precrop_roi(
             cropped_rgb,
-            tpl,
-            _MANAGER_SUPPLY_ICON_REGION_PRECROP,
+            p,
+            _ICON_REGION,
             threshold=float(threshold),
             max_matches=12,
             nms_iou=0.35,
         )
         for it in raw:
             row = dict(it)
-            row["name"] = disp_name
-            row["type"] = item_type
+            row["name"] = disp
+            row["type"] = itype
             row["template_file"] = fn
             parts.append(row)
     ms = (time.perf_counter() - t0) * 1000.0
-    if not found:
-        empty_items: list[dict[str, object]] = []
+    if not ok:
         return {
             "match_ms": round(ms, 3),
-            "items": empty_items,
-            "counts": _supply_counts_payload(empty_items),
+            "items": [],
+            "counts": {},
             "error": "template_missing",
         }
-    items = _nms_supply_hit_dicts(parts, iou_thresh=0.35, max_keep=20)
-    return {
-        "match_ms": round(ms, 3),
-        "items": items,
-        "counts": _supply_counts_payload(items),
-    }
-
-
-def _manager_aux_region_fields(cropped_rgb: Image.Image, *, threshold: float) -> dict[str, object]:
-    """补充店长特供页的辅助区域识别字段（咖啡后台条、咖啡机状态、杯子盘状态、各工作台空闲状态）。"""
-    out: dict[str, object] = {}
-    cb_path = _MANAGER_IMG_DIR / _COFFEE_BACK_EMPTY_FILE
-    cb_score = match_template_score_in_precrop_roi(cropped_rgb, cb_path, _COFFEE_BACK_EMPTY_REGION_PRECROP)
-    if cb_score is not None:
-        s = float(cb_score)
-        out["coffee_back_bar_similarity"] = round(s, 4)
-        out["coffee_back_bar"] = "空" if s >= float(threshold) else "有"
-    else:
-        out["coffee_back_bar_similarity"] = None
-        out["coffee_back_bar"] = "有"
-
-    cm_path = _MANAGER_IMG_DIR / _COFFEE_MACHINE_IDLE_FILE
-    cm_score = match_template_score_in_precrop_roi(cropped_rgb, cm_path, _COFFEE_MACHINE_IDLE_REGION_PRECROP)
-    if cm_score is not None:
-        s = float(cm_score)
-        out["coffee_machine_similarity"] = round(s, 4)
-        out["coffee_machine_status"] = "空闲" if s >= float(threshold) else "使用中"
-    else:
-        out["coffee_machine_similarity"] = None
-        out["coffee_machine_status"] = "使用中"
-
-    sims: dict[str, float] = {}
-    best_label = "未知"
-    best_s = -1.0
-    best_raw: tuple[int, int, int, int, float] | None = None
-    for fn, label in _CUP_PLATE_TEMPLATES:
-        p = _MANAGER_IMG_DIR / fn
-        raw = _match_template_in_precrop_roi_raw(cropped_rgb, p, _CUP_PLATE_REGION_PRECROP)
-        if raw is None:
-            continue
-        fv = float(raw[4])
-        sims[label] = fv
-        if fv > best_s:
-            best_s = fv
-            best_label = label
-            best_raw = raw
-    out["cup_plate_similarities"] = {k: round(v, 4) for k, v in sims.items()}
-    if best_s < 0:
-        out["cup_plate"] = "未知"
-        out["cup_plate_similarity"] = None
-        out["cup_plate_peak"] = None
-    elif best_s >= float(threshold):
-        out["cup_plate"] = best_label
-        out["cup_plate_similarity"] = round(float(best_s), 4)
-        if best_raw is not None:
-            bx, by, bw, bh = best_raw[0], best_raw[1], best_raw[2], best_raw[3]
-            out["cup_plate_peak"] = {
-                "x": int(bx),
-                "y": int(by),
-                "w": int(bw),
-                "h": int(bh),
-                "cx": int(bx + bw // 2),
-                "cy": int(by + bh // 2),
-            }
-        else:
-            out["cup_plate_peak"] = None
-    else:
-        out["cup_plate"] = "未知"
-        out["cup_plate_similarity"] = round(float(best_s), 4)
-        out["cup_plate_peak"] = None
-
-    # 各工作台「空闲状态」：每个模板对应不同 region
-    status_similarities: dict[str, float | None] = {}
-    status_values: dict[str, str] = {}
-    for fn, status_name, region in _MANAGER_SUPPLY_STATUS_TEMPLATES:
-        p = _MANAGER_IMG_DIR / fn
-        if not p.is_file():
-            status_similarities[status_name] = None
-            status_values[status_name] = "未知"
-            continue
-        s0 = match_template_score_in_precrop_roi(cropped_rgb, p, region)
-        if s0 is None:
-            status_similarities[status_name] = None
-            status_values[status_name] = "未知"
-            continue
-        s = float(s0)
-        status_similarities[status_name] = round(s, 4)
-        status_values[status_name] = "空" if s >= float(threshold) else "有"
-    out["supply_status_similarities"] = status_similarities
-    out["supply_status"] = status_values
-
-    # 分数：五角星多实例匹配（允许多个）
-    star_path = _MANAGER_IMG_DIR / _SCORE_STAR_FILE
-    if star_path.is_file():
-        try:
-            star_hits = match_template_multi_in_precrop_roi(
-                cropped_rgb,
-                star_path,
-                _SCORE_STAR_REGION_PRECROP,
-                threshold=float(threshold),
-                max_matches=12,
-                nms_iou=0.2,
-            )
-            # 只做轻量 NMS，避免同一颗星在相邻像素重复命中
-            out["score"] = _nms_supply_hit_dicts([dict(h) for h in star_hits if isinstance(h, dict)], iou_thresh=0.2, max_keep=20)
-        except Exception:
-            _log.exception("score star multi match failed")
-            out["score"] = []
-    else:
-        out["score"] = []
-    return out
+    items = _nms_hits(parts, iou_thresh=0.35, max_keep=20)
+    counts = _count_icons_by_name(items)
+    return {"match_ms": round(ms, 3), "items": items, "counts": counts}
 
 
 def gather_manager_supply_tick(
@@ -309,75 +341,38 @@ def gather_manager_supply_tick(
     hwnd: int,
     page_match: dict[str, object],
 ) -> ManagerSupplyTickSnapshot:
-    """从执行器读取本帧店长特供相关数据。"""
+    """从执行器读取本帧识别结果，组装 tick 快照。"""
     _ = page_match
     hits = executor.supply_match_items_snapshot()
-    counts = _supply_counts_payload([dict(h) for h in hits if isinstance(h, dict)])
-    md = executor.supply_match_debug_snapshot()
-    mdd = md if isinstance(md, dict) else {}
-    cb = mdd.get("coffee_back_bar")
-    cbs = mdd.get("coffee_back_bar_similarity")
-    cp = mdd.get("cup_plate")
-    cps = mdd.get("cup_plate_similarity")
-    cms = mdd.get("coffee_machine_status")
-    cmss = mdd.get("coffee_machine_similarity")
-    supply_status = mdd.get("supply_status")
-    supply_status_similarities = mdd.get("supply_status_similarities")
-    score_hits = mdd.get("score")
-    score_items: list[dict[str, object]] = []
-    if isinstance(score_hits, list):
-        for el in score_hits:
-            if isinstance(el, dict):
-                score_items.append(dict(el))
-    cb_s = f"{float(cbs):.3f}" if isinstance(cbs, (int, float)) else "—"
-    cb_v = str(cb) if cb is not None else "—"
-    cp_v = str(cp) if cp is not None else "—"
-    coffee_machine_status = str(cms) if cms is not None else "—"
-    supply_status_v: dict[str, str] = {}
-    if isinstance(supply_status, dict):
-        for k, v in supply_status.items():
-            supply_status_v[str(k)] = str(v)
-    supply_status_sims_v: dict[str, float | None] = {}
-    if isinstance(supply_status_similarities, dict):
-        for k, v in supply_status_similarities.items():
-            kk = str(k)
-            if v is None:
-                supply_status_sims_v[kk] = None
-            elif isinstance(v, (int, float)):
-                supply_status_sims_v[kk] = float(v)
-            else:
-                supply_status_sims_v[kk] = None
+    cnt = _count_icons_by_name([dict(h) for h in hits if isinstance(h, dict)])
+    foods = _foods_rows_from_counts(cnt)
 
-    # 把旧状态也并入统一的 supply_status 结构，便于上层只处理一套字段
-    supply_status_v.setdefault("咖啡后台条", cb_v)
-    supply_status_v.setdefault("咖啡机", coffee_machine_status)
-    supply_status_v.setdefault("杯子盘", cp_v)
-    if isinstance(cbs, (int, float)):
-        supply_status_sims_v.setdefault("咖啡后台条", float(cbs))
-    if isinstance(cmss, (int, float)):
-        supply_status_sims_v.setdefault("咖啡机", float(cmss))
-    if isinstance(cps, (int, float)):
-        supply_status_sims_v.setdefault("杯子盘", float(cps))
-    return ManagerSupplyTickSnapshot(
-        monotonic=monotonic,
-        hwnd=hwnd,
-        cb_v=cb_v,
-        coffee_machine_status=coffee_machine_status,
-        cp_v=cp_v,
-        cb_s=cb_s,
-        counts=counts,
-        score=score_items,
-        supply_status=supply_status_v,
-        supply_status_similarities=supply_status_sims_v,
-    )
+    md = executor.supply_match_debug_snapshot()
+    kitchen: dict[str, str | int] = {}
+    if isinstance(md, dict):
+        raw_k = md.get("kitchen")
+        if isinstance(raw_k, dict):
+            for a, b in raw_k.items():
+                kk = str(a)
+                if isinstance(b, int):
+                    kitchen[kk] = b
+                elif isinstance(b, float) and not isinstance(b, bool) and float(b).is_integer():
+                    kitchen[kk] = int(b)
+                else:
+                    kitchen[kk] = str(b)
+
+    return ManagerSupplyTickSnapshot(monotonic=monotonic, hwnd=hwnd, foods=foods, kitchen=kitchen)
 
 
 def maybe_run_supply_multimatch(executor: Any, now: float, page_id: str | None) -> None:
-    """仅在执行器已启动且当前为店长特供页时，对最新裁剪帧做多实例匹配（节流）。"""
-    if page_id != "manager-supply":
+    """店长「特供」页：节流跑一次图标多模板匹配与厨房槽位扫描，结果写入 ``executor._match_debug``。"""
+
+    # 离开特供页：清空匹配调试，防止残留
+    if page_id != MANAGER_SUPPLY_PAGE_ID:
         with executor._lock:
             executor._clear_match_debug_unlocked()
         return
+    # 未到间隔则跳过，降低 CPU
     if not executor._cooldown.try_fire("manager:supply:multimatch", SUPPLY_MULTIMATCH_MIN_INTERVAL_S, now):
         return
     cropped = executor._capture.get_last_cropped_rgb_copy()
@@ -385,28 +380,39 @@ def maybe_run_supply_multimatch(executor: Any, now: float, page_id: str | None) 
         with executor._lock:
             executor._clear_match_debug_unlocked()
         return
-    st = executor._capture.get_status()
-    th = float(st.page_match_threshold)
+    th = float(executor._capture.get_status().page_match_threshold)
+    # 特供页图标：多模板匹配 + NMS，得到 items / counts
     try:
-        dbg = _run_manager_supply_icon_multimatch(cropped, threshold=th)
+        icon_dbg = _run_icon_multimatch(cropped, threshold=th)
     except Exception:
-        _log.exception("manager supply icon multi match failed")
-        dbg = {
-            "match_ms": 0.0,
-            "items": [],
-            "counts": _supply_counts_payload([]),
-            "error": "match_failed",
-        }
-    if isinstance(dbg, dict):
-        try:
-            dbg.update(_manager_aux_region_fields(cropped, threshold=th))
-        except Exception:
-            _log.exception("manager aux region fields failed")
+        _log.exception("icon multimatch failed")
+        icon_dbg = {"match_ms": 0.0, "items": [], "counts": {}, "error": "match_failed"}
+
+    # 厨房：page 式单 ROI 单标签（kitchen.json）
+    try:
+        kitchen_map: dict[str, str | int] = dict(_scan_kitchen_map(cropped, threshold=th))
+    except Exception:
+        _log.exception("kitchen scan failed")
+        kitchen_map = {}
+
+    # 满意度星星：多数计数，单独于厨房槽位
+    try:
+        kitchen_map[_STAR_KITCHEN_KEY] = _count_star_instances(cropped, threshold=th)
+    except Exception:
+        _log.exception("star match failed")
+
+    counts = icon_dbg.get("counts") if isinstance(icon_dbg.get("counts"), dict) else {}
+    cnt_map: dict[str, int] = {}
+    if isinstance(counts, dict):
+        for k, v in counts.items():
+            try:
+                cnt_map[str(k)] = int(v)
+            except (TypeError, ValueError):
+                pass
+
+    dbg: dict[str, Any] = dict(icon_dbg) if isinstance(icon_dbg, dict) else {}
+    dbg["kitchen"] = kitchen_map
+    dbg["foods"] = _foods_rows_from_counts(cnt_map)
+
     with executor._lock:
         executor._match_debug = dbg
-
-
-MANAGER_SUPPLY_PAGE_ID = "manager-supply"
-
-# 供 ``manager_executor`` 等模块引用，避免跨模块访问私有名
-DRINK_AUTOMATION_NAMES = _DRINK_AUTOMATION_NAMES
