@@ -20,8 +20,8 @@ from tools.capture_pipeline_debug import (
     merge_pipeline_timings,
     perf_elapsed_ms,
 )
-from features.auto_fish_page_match import AUTO_FISH_PAGES_JSON, MANAGER_PAGES_JSON, MUSIC_PAGES_JSON
-from features.music_drum_match import compute_music_drum_debug
+from features.page_match_paths import AUTO_FISH_PAGES_JSON, MANAGER_PAGES_JSON, MUSIC_PAGES_JSON
+from features.music.music_drum_match import compute_music_drum_debug
 from tools.page_template_match import PageMatchResult, PageTemplateMatcher, run_reeling_bar_templates
 from tools.window_capture import WGC_SNAPSHOT_MARGIN_BOTTOM_PX, WGC_SNAPSHOT_MARGIN_LR_PX
 

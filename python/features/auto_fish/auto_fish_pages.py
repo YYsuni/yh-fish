@@ -1,15 +1,10 @@
 # -*- coding: utf-8 -*-
-"""自动钓鱼执行器：启动后轮询当前页面，按 page_id 调用各页处理函数。"""
+"""自动钓鱼：各 page_id 的处理函数与注册表。"""
 
 from __future__ import annotations
 
-import logging
-import threading
 import time
-from dataclasses import dataclass, field
 from typing import Callable
-
-from capture_service import CaptureService
 
 import tools.exec_msg as exec_msg
 import tools.game_input as game_input
@@ -19,88 +14,13 @@ from tools.page_template_match import (
     match_template_score_in_precrop_roi,
 )
 
-_log = logging.getLogger(__name__)
-
-# 自动逻辑状态（与前端 `AutoFishLogicState` 对齐）
-LOGIC_FISHING = "fishing"
-LOGIC_SELL_FISH = "sell-fish"
-LOGIC_BAIT = "bait"
-VALID_LOGIC_STATES: frozenset[str] = frozenset({LOGIC_FISHING, LOGIC_SELL_FISH, LOGIC_BAIT})
-_LOGIC_LABELS: dict[str, str] = {
-    LOGIC_FISHING: "钓鱼",
-    LOGIC_SELL_FISH: "卖鱼",
-    LOGIC_BAIT: "鱼饵",
-}
-
-
-class CooldownGate:
-    """按任意字符串 key 记录上次触发时间，`try_fire` 超过间隔才返回 True 并刷新时间。"""
-
-    def __init__(self) -> None:
-        self._last: dict[str, float] = {}
-
-    def try_fire(self, key: str, min_interval_s: float, now: float) -> bool:
-        last = self._last.get(key, 0.0)
-        if now - last >= min_interval_s:
-            self._last[key] = now
-            return True
-        return False
-
-
-@dataclass
-class TickContext:
-    """每一拍传给页面处理函数的上下文。"""
-
-    hwnd: int
-    page_match: dict[str, object]
-    monotonic: float
-    cooldown: CooldownGate
-    capture: CaptureService
-    page_match_threshold: float
-    logic_state: str = LOGIC_FISHING
-    apply_logic_state: Callable[[str], None] | None = field(default=None)
-    sell_fish_on_no_bait: bool = True  # True：无鱼饵切卖鱼；False：直接鱼饵
-    fish_lost_inc: Callable[[], int] | None = field(default=None)  # 累计掉鱼次数 +1，返回新总数
-
-
-def _click_page_match(
-    ctx: TickContext,
-    cooldown_key: str,
-    label: str,
-    *,
-    physical: bool = False,
-    cooldown_s: float = 3.0,
-) -> bool:
-    """按 page_match 的 x,y,w,h 点击。"""
-    pm = ctx.page_match
-    try:
-        x, y, w, h = (int(pm["x"]), int(pm["y"]), int(pm["w"]), int(pm["h"]))
-    except (KeyError, TypeError, ValueError):
-        return False
-    if w <= 0 or h <= 0:
-        return False
-    if not ctx.cooldown.try_fire(cooldown_key, cooldown_s, ctx.monotonic):
-        return False
-
-    cx = x + w // 2
-    cy = y + h // 2
-    exec_msg.msg_out(f"{label}：点击匹配区中心 ({cx}, {cy})")
-    if physical:
-        return bool(
-            game_input.send_left_click_physical(
-                ctx.hwnd, cx, cy, from_precrop=False, hover_dwell_s=0.45, hold_s=0.2
-            )
-        )
-
-    return bool(game_input.send_left_click(ctx.hwnd, cx, cy))
-
-
-def _tap_f_cooldown(ctx: TickContext, cooldown_key: str, label: str, cooldown_s: float = 3.0) -> None:
-    """按 F 一次，受冷却限制。"""
-    if not ctx.cooldown.try_fire(cooldown_key, cooldown_s, ctx.monotonic):
-        return
-    exec_msg.msg_out(f"{label}：F 键按下")
-    game_input.send_key_tap(ctx.hwnd, game_input.VK_F)
+from features.auto_fish.auto_fish_actions import click_page_match, tap_f_cooldown
+from features.auto_fish.auto_fish_types import (
+    LOGIC_BAIT,
+    LOGIC_FISHING,
+    LOGIC_SELL_FISH,
+    TickContext,
+)
 
 
 def _noop_page(ctx: TickContext) -> None:
@@ -156,16 +76,16 @@ def _page_start_fishing(ctx: TickContext) -> None:
         exec_msg.msg_out("开始钓鱼页面（鱼饵）：E 键按下")
         game_input.send_key_tap(ctx.hwnd, game_input.VK_E)
         return
-    _tap_f_cooldown(ctx, "start-fishing", "开始钓鱼页面")
+    tap_f_cooldown(ctx, "start-fishing", "开始钓鱼页面")
 
 
 def _page_waiting_for_bite(ctx: TickContext) -> None:
-    _tap_f_cooldown(ctx, "waiting-for-bite", "等待咬钩页面")
+    tap_f_cooldown(ctx, "waiting-for-bite", "等待咬钩页面")
 
 
 def _page_fishing_prep(ctx: TickContext) -> None:
     if ctx.logic_state == LOGIC_FISHING:
-        if _click_page_match(ctx, "fishing-prep", "钓鱼准备页面", physical=True):
+        if click_page_match(ctx, "fishing-prep", "钓鱼准备页面", physical=True):
             time.sleep(1.5)
         return
     if ctx.logic_state == LOGIC_BAIT:
@@ -197,11 +117,11 @@ def _page_empty(ctx: TickContext) -> None:
 
 
 def _page_fishing_interact(ctx: TickContext) -> None:
-    _tap_f_cooldown(ctx, "fishing-interact", "钓鱼交互页面")
+    tap_f_cooldown(ctx, "fishing-interact", "钓鱼交互页面")
 
 
 def _page_fish_hooked(ctx: TickContext) -> None:
-    _tap_f_cooldown(ctx, "fish-hooked", "上钩页面")
+    tap_f_cooldown(ctx, "fish-hooked", "上钩页面")
 
 
 def _page_fish_escaped(ctx: TickContext) -> None:
@@ -370,134 +290,8 @@ PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
 }
 
 
-class AutoFishExecutor:
-    """与 `CaptureService` 同进程：单独线程轮询页面并执行 `PAGE_HANDLERS`。"""
-
-    def __init__(self, capture: CaptureService) -> None:
-        self._capture = capture
-        self._lock = threading.Lock()
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._cooldown = CooldownGate()
-        self._last_page_id: str | None = None
-        self._logic_state: str = LOGIC_FISHING
-        self._sell_fish_on_no_bait: bool = True
-        self._fish_lost_total: int = 0
-
-    def is_running(self) -> bool:
-        t = self._thread
-        return t is not None and t.is_alive()
-
-    def status_dict(self) -> dict[str, object]:
-        with self._lock:
-            last = self._last_page_id
-            logic = self._logic_state
-            sell_on_no = self._sell_fish_on_no_bait
-            lost = self._fish_lost_total
-        return {
-            "running": self.is_running(),
-            "last_page_id": last,
-            "logic_state": logic,
-            "sell_fish_on_no_bait": sell_on_no,
-            "fish_lost_total": lost,
-        }
-
-    def _apply_logic_state(self, logic_state: str) -> None:
-        if logic_state not in VALID_LOGIC_STATES:
-            return
-        with self._lock:
-            self._logic_state = logic_state
-
-    def _increment_fish_lost(self) -> int:
-        with self._lock:
-            self._fish_lost_total += 1
-            return self._fish_lost_total
-
-    def set_logic_state(self, logic_state: str) -> dict[str, object]:
-        if logic_state not in VALID_LOGIC_STATES:
-            raise ValueError(f"无效 logic_state: {logic_state!r}")
-        label = _LOGIC_LABELS.get(logic_state, logic_state)
-        self._apply_logic_state(logic_state)
-        exec_msg.msg_out(f"逻辑切换为：{label}")
-        return self.status_dict()
-
-    def set_sell_fish_on_no_bait(self, enabled: bool) -> dict[str, object]:
-        with self._lock:
-            self._sell_fish_on_no_bait = bool(enabled)
-        return self.status_dict()
-
-    def start(self) -> dict[str, object]:
-        if self.is_running():
-            return {"running": True, "started": False}
-        self._stop.clear()
-        exec_msg.msg_out("自动钓鱼启动")
-        self._thread = threading.Thread(target=self._loop, name="auto-fish", daemon=True)
-        self._thread.start()
-        return {"running": True, "started": True}
-
-    def stop(self) -> dict[str, object]:
-        was_running = self.is_running()
-        self._stop.set()
-        t = self._thread
-        if t and t.is_alive():
-            t.join(timeout=3.0)
-        self._thread = None
-        if was_running:
-            exec_msg.msg_out("自动钓鱼停止")
-        return {"running": False}
-
-    def _loop(self) -> None:
-        while not self._stop.is_set():
-            if self._capture.get_capture_context() != "fish":
-                with self._lock:
-                    self._last_page_id = None
-                time.sleep(0.05)
-                continue
-            s = self._capture.get_status()
-            pm = s.page_match
-            page_id: str | None = None
-            if isinstance(pm, dict):
-                pid = pm.get("page_id")
-                if isinstance(pid, str):
-                    page_id = pid
-            with self._lock:
-                self._last_page_id = page_id
-
-            if not s.ok or s.hwnd is None:
-                time.sleep(0.2)
-                continue
-            if not isinstance(pm, dict):
-                time.sleep(0.05)
-                continue
-
-            hwnd = s.hwnd
-            now = time.monotonic()
-
-            with self._lock:
-                logic_effective = self._logic_state
-                sell_on_no_bait = self._sell_fish_on_no_bait
-
-            ctx = TickContext(
-                hwnd=hwnd,
-                page_match=dict(pm),
-                monotonic=now,
-                cooldown=self._cooldown,
-                capture=self._capture,
-                page_match_threshold=float(s.page_match_threshold),
-                logic_state=logic_effective,
-                apply_logic_state=self._apply_logic_state,
-                sell_fish_on_no_bait=sell_on_no_bait,
-                fish_lost_inc=self._increment_fish_lost,
-            )
-            try:
-                if page_id:
-                    PAGE_HANDLERS.get(page_id, _noop_page)(ctx)
-            except Exception:
-                _log.exception(
-                    "auto-fish page handler failed page_id=%s logic=%s",
-                    page_id,
-                    logic_effective,
-                )
-
-            time.sleep(0.05)
-
+def get_page_handler(page_id: str | None) -> Callable[[TickContext], None]:
+    """取 page handler；未知时返回 noop。"""
+    if not page_id:
+        return _noop_page
+    return PAGE_HANDLERS.get(page_id, _noop_page)

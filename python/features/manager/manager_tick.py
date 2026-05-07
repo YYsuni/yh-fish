@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""店长线程单次 tick 上下文与节流（与具体页面逻辑解耦）。"""
+"""店长线程单次 tick 上下文与节流，以及店长特供 tick 快照数据结构。"""
 
 from __future__ import annotations
 
@@ -29,3 +29,17 @@ class ManagerTickContext:
     cooldown: CooldownGate
     capture: Any
     executor: Any
+
+
+@dataclass
+class ManagerSupplyTickSnapshot:
+    """店长特供单轮 tick：仅含采集结果，供 ``execute_manager_supply_tick`` 使用。"""
+
+    monotonic: float
+    hwnd: int
+    cb_v: str
+    coffee_machine_status: str
+    cp_v: str
+    cb_s: str
+    counts: dict[str, int]
+    score: list[dict[str, object]]

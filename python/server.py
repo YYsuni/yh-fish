@@ -16,10 +16,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from features.auto_fish_executor import AutoFishExecutor
+from features.auto_fish.auto_fish_executor import AutoFishExecutor
 from capture_service import CaptureService
-from features.manager_executor import ManagerExecutor
-from features.music_executor import MusicExecutor
+from features.manager.manager_executor import ManagerExecutor
+from features.music.music_executor import MusicExecutor
 from tools.exec_msg import snapshot as msg_snapshot, start_admin_warn_loop, stop_admin_warn_loop
 import tools.game_input as game_input
 from tools.app_settings import AppSettingsPayload, HotkeyPayload, load_app_settings, save_app_settings

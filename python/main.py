@@ -11,10 +11,10 @@ from pathlib import Path
 import uvicorn
 import webview
 
-from features.auto_fish_executor import AutoFishExecutor
+from features.auto_fish.auto_fish_executor import AutoFishExecutor
 from capture_service import CaptureService
-from features.manager_executor import ManagerExecutor
-from features.music_executor import MusicExecutor
+from features.manager.manager_executor import ManagerExecutor
+from features.music.music_executor import MusicExecutor
 from server import create_app
 
 

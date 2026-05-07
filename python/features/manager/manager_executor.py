@@ -11,16 +11,14 @@ from typing import Any, Callable
 from capture_service import CaptureService
 
 import tools.exec_msg as exec_msg
-from features.manager_supply_execute import execute_manager_supply_tick
-from features.manager_supply_page import (
+from features.manager.manager_supply_execute import execute_manager_supply_tick
+from features.manager.manager_supply_match import (
     DRINK_AUTOMATION_NAMES,
-    DRINK_SUPPLY_SLOT_TOL_PX,
     MANAGER_SUPPLY_PAGE_ID,
     gather_manager_supply_tick,
     maybe_run_supply_multimatch,
 )
-from features.manager_supply_snapshot import ManagerSupplySlotTrack
-from features.manager_tick import CooldownGate, ManagerTickContext
+from features.manager.manager_tick import CooldownGate, ManagerTickContext
 
 _log = logging.getLogger(__name__)
 
@@ -28,6 +26,7 @@ DEFAULT_POLL_S = 0.05
 
 
 def _noop_page(ctx: ManagerTickContext) -> None:
+    """店长页处理占位：未注册对应 ``page_id`` 时不做任何事。"""
     _ = ctx
 
 
@@ -38,6 +37,7 @@ class ManagerExecutor:
     """与 `CaptureService` 同进程：轮询 `page_match`（店长特供模式下由捕获管线按 images/manager/page.json 填充）。"""
 
     def __init__(self, capture: CaptureService) -> None:
+        """绑定捕获服务并初始化线程与节流门闩。"""
         self._capture = capture
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -45,14 +45,13 @@ class ManagerExecutor:
         self._last_page_id: str | None = None
         self._cooldown = CooldownGate()
         self._match_debug: dict[str, object] | None = None
-        self._cup_plate_tracks: list[ManagerSupplySlotTrack] = []
-        self._drink_tracks: list[ManagerSupplySlotTrack] = []
-        self._serve_cup_latch: str | None = None
 
     def supply_match_hit_count(self) -> int:
+        """返回最近一次店长特供多模板匹配的命中项数量。"""
         return len(self.supply_match_items_snapshot())
 
     def supply_match_items_snapshot(self) -> list[dict[str, Any]]:
+        """快照当前 ``match_debug`` 中的命中项列表（浅拷贝每项为独立 dict）。"""
         with self._lock:
             dbg = self._match_debug
         if not isinstance(dbg, dict):
@@ -67,38 +66,18 @@ class ManagerExecutor:
         return out
 
     def supply_match_debug_snapshot(self) -> dict[str, Any] | None:
+        """快照完整 ``match_debug``（若没有则为 ``None``）。"""
         with self._lock:
             dbg = self._match_debug
         return dict(dbg) if isinstance(dbg, dict) else None
 
-    def peek_earliest_automation_drink(self) -> ManagerSupplySlotTrack | None:
-        with self._lock:
-            cands = [t for t in self._drink_tracks if t.label in DRINK_AUTOMATION_NAMES]
-            if not cands:
-                return None
-            return min(cands, key=lambda t: t.first_seen)
-
-    def discard_drink_track(self, slot: ManagerSupplySlotTrack) -> None:
-        with self._lock:
-            self._drink_tracks = [
-                x
-                for x in self._drink_tracks
-                if not (x.label == slot.label and abs(x.cx - slot.cx) <= DRINK_SUPPLY_SLOT_TOL_PX and abs(x.cy - slot.cy) <= DRINK_SUPPLY_SLOT_TOL_PX)
-            ]
-
-    def serve_cup_latch_get(self) -> str | None:
-        with self._lock:
-            return self._serve_cup_latch
-
-    def serve_cup_latch_replace(self, cp_v: str | None) -> None:
-        with self._lock:
-            self._serve_cup_latch = cp_v
-
     def is_running(self) -> bool:
+        """店长轮询线程是否仍在运行。"""
         t = self._thread
         return t is not None and t.is_alive()
 
     def status_dict(self) -> dict[str, object]:
+        """导出运行状态：是否在跑、最近一次 ``page_id``、运行中时附带 ``match_debug``。"""
         with self._lock:
             last = self._last_page_id
             dbg = self._match_debug if self.is_running() else None
@@ -109,6 +88,7 @@ class ManagerExecutor:
         }
 
     def start(self) -> dict[str, object]:
+        """启动店长后台线程；若已在运行则返回 ``started: False``。"""
         if self.is_running():
             return {"running": True, "started": False}
         self._stop.clear()
@@ -118,6 +98,7 @@ class ManagerExecutor:
         return {"running": True, "started": True}
 
     def stop(self) -> dict[str, object]:
+        """请求停止店长线程并清空匹配调试与槽位缓存；可选等待线程退出。"""
         was_running = self.is_running()
         self._stop.set()
         t = self._thread
@@ -126,17 +107,16 @@ class ManagerExecutor:
         self._thread = None
         with self._lock:
             self._clear_match_debug_unlocked()
-            self._cup_plate_tracks.clear()
-            self._drink_tracks.clear()
         if was_running:
             exec_msg.msg_out("店长特供停止")
         return {"running": False}
 
     def _clear_match_debug_unlocked(self) -> None:
+        """在已持有 ``self._lock`` 的前提下清空匹配调试。"""
         self._match_debug = None
-        self._serve_cup_latch = None
 
     def _maybe_run_supply_multimatch(self, now: float, page_id: str | None) -> None:
+        """按节流策略在店长特供页跑一次多模板匹配并写回 ``_match_debug`` / 槽位跟踪。"""
         maybe_run_supply_multimatch(self, now, page_id)
 
     def _loop(self) -> None:
@@ -147,8 +127,6 @@ class ManagerExecutor:
                 with self._lock:
                     self._last_page_id = None
                     self._clear_match_debug_unlocked()
-                    self._cup_plate_tracks.clear()
-                    self._drink_tracks.clear()
                 time.sleep(0.05)
                 continue
 
@@ -168,7 +146,7 @@ class ManagerExecutor:
                 time.sleep(0.2)
                 continue
             if not isinstance(pm, dict):
-                time.sleep(0.05)
+                time.sleep(0.1)
                 continue
 
             # 店长特供页：节流内更新 match_debug / 饮品与杯子盘槽位
@@ -185,7 +163,7 @@ class ManagerExecutor:
                         hwnd=hwnd,
                         page_match=dict(pm),
                     )
-                    execute_manager_supply_tick(snap, self, self._cooldown)
+                    execute_manager_supply_tick(snap, self._cooldown)
                 elif page_id:
                     # 其它店长子页（预留）：走通用 tick 上下文
                     ctx = ManagerTickContext(
