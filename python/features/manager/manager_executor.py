@@ -11,11 +11,13 @@ from typing import Any, Callable
 from capture_service import CaptureService
 
 import tools.exec_msg as exec_msg
+from features.manager.manager_pages import register_manager_pages
 from features.manager.manager_supply_execute import execute_manager_supply_tick
 from features.manager.manager_supply_match import (
     MANAGER_SUPPLY_PAGE_ID,
     gather_manager_supply_tick,
     maybe_run_supply_multimatch,
+    maybe_run_supply_star_only,
 )
 from features.manager.manager_tick import CooldownGate, ManagerTickContext
 
@@ -30,6 +32,7 @@ def _noop_page(ctx: ManagerTickContext) -> None:
 
 
 MANAGER_PAGE_HANDLERS: dict[str, Callable[[ManagerTickContext], None]] = {}
+register_manager_pages(MANAGER_PAGE_HANDLERS)
 
 
 class ManagerExecutor:
@@ -44,6 +47,7 @@ class ManagerExecutor:
         self._last_page_id: str | None = None
         self._cooldown = CooldownGate()
         self._match_debug: dict[str, object] | None = None
+        self._direct_knock: bool = True
 
     def _clear_match_debug_unlocked(self) -> None:
         """在已持有 ``self._lock`` 时清空匹配调试。"""
@@ -80,7 +84,19 @@ class ManagerExecutor:
         with self._lock:
             last = self._last_page_id
             dbg = self._match_debug if self.is_running() else None
-        return {"running": self.is_running(), "last_page_id": last, "match_debug": dbg}
+            dk = self._direct_knock
+        return {
+            "running": self.is_running(),
+            "last_page_id": last,
+            "match_debug": dbg,
+            "direct_knock": dk,
+        }
+
+    def set_direct_knock(self, enabled: bool) -> dict[str, object]:
+        """店长特供页是否跳过图像采集，仅固定坐标连点。"""
+        with self._lock:
+            self._direct_knock = bool(enabled)
+        return self.status_dict()
 
     def start(self) -> dict[str, object]:
         """启动店长线程。"""
@@ -138,17 +154,29 @@ class ManagerExecutor:
                 continue
 
             now = time.monotonic()
-            self._maybe_run_supply_multimatch(now, page_id)
             hwnd = s.hwnd
             try:
                 if page_id == MANAGER_SUPPLY_PAGE_ID:
-                    snap = gather_manager_supply_tick(
-                        self,
-                        monotonic=now,
-                        hwnd=hwnd,
-                        page_match=dict(pm),
-                    )
-                    execute_manager_supply_tick(snap, self._cooldown)
+                    with self._lock:
+                        use_direct = self._direct_knock
+                    if use_direct:
+                        maybe_run_supply_star_only(self, now, page_id)
+                        snap = gather_manager_supply_tick(
+                            self,
+                            monotonic=now,
+                            hwnd=hwnd,
+                            page_match=dict(pm),
+                        )
+                        execute_manager_supply_tick(snap, self._cooldown, direct_knock=True)
+                    else:
+                        self._maybe_run_supply_multimatch(now, page_id)
+                        snap = gather_manager_supply_tick(
+                            self,
+                            monotonic=now,
+                            hwnd=hwnd,
+                            page_match=dict(pm),
+                        )
+                        execute_manager_supply_tick(snap, self._cooldown)
                 elif page_id:
                     ctx = ManagerTickContext(
                         hwnd=hwnd,

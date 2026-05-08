@@ -59,6 +59,12 @@ class SetAutoFishSellOnNoBaitBody(BaseModel):
     enabled: bool
 
 
+class SetManagerDirectKnockBody(BaseModel):
+    """POST `/api/manager/direct-knock`：店长特供页是否仅固定坐标连点（关则图像采集后再决策）。"""
+
+    enabled: bool
+
+
 PY_DIR = Path(__file__).resolve().parent
 
 
@@ -357,6 +363,11 @@ def create_app(
     def manager_stop() -> dict[str, object]:
         """停止店长特供线程。"""
         return manager.stop()
+
+    @app.post("/api/manager/direct-knock")
+    def manager_set_direct_knock(body: SetManagerDirectKnockBody) -> dict[str, object]:
+        """店长特供页跳过多匹配与槽位采集，仅对固定坐标节流点击。"""
+        return manager.set_direct_knock(body.enabled)
 
     @app.get("/api/msg/log")
     def msg_log() -> dict[str, Any]:

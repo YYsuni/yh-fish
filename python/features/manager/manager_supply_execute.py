@@ -44,8 +44,8 @@ def _peak_by_types(
     foods: list[tuple[str, str, int]],
 ) -> tuple[str | None, int, str | None, int, str | None, int]:
     """饮料 / 主食 / 甜品各自当前峰值数量与对应名称（并列取 ``foods`` 中先出现者）。"""
-    top_drink = top_staple = top_dessert = None
-    nd = ns = nde = 0
+    top_drink = top_staple = top_dessert = top_red_ribbon = None
+    nd = ns = nde = nr = 0
     for name, itype, n in foods:
         if itype == "饮料" and n > nd:
             top_drink, nd = name, n
@@ -53,26 +53,41 @@ def _peak_by_types(
             top_staple, ns = name, n
         elif itype == "甜品" and n > nde:
             top_dessert, nde = name, n
-    return top_drink, nd, top_staple, ns, top_dessert, nde
+        elif itype == "红领巾" and n > nr:
+            top_red_ribbon, nr = name, n
+    return top_drink, nd, top_staple, ns, top_dessert, nde, top_red_ribbon, nr
 
 
 def execute_manager_supply_tick(
     snapshot: ManagerSupplyTickSnapshot,
     cooldown: CooldownGate,
+    *,
+    direct_knock: bool = False,
 ) -> None:
     """根据快照节流输出日志，并按厨房/订单状态触发固定坐标点击。"""
 
-    def click_physical(x: int, y: int) -> None:
+    def click_physical(x: int, y: int, min_interval_s=0.3) -> None:
         """同一坐标节流后发送左键。"""
-        if cooldown.try_fire(f"click:{x},{y}", 0.5, snapshot.monotonic):
+        if cooldown.try_fire(f"click:{x},{y}", min_interval_s, snapshot.monotonic):
             game_input.send_left_click_physical(snapshot.hwnd, x, y, hover_dwell_s=0.1, hold_s=0.1)
+
+    if _star_count(kitchen) > 0:
+        click_physical(30, 72, 0.8)
+        return
+
+    if direct_knock:
+        click_physical(69, 347)
 
     kitchen = snapshot.kitchen
     foods = snapshot.foods
-    top_drink, drink_num, top_staple, staple_num, top_dessert, dessert_num = _peak_by_types(foods)
+    top_drink, drink_num, top_staple, staple_num, top_dessert, dessert_num, top_red_ribbon, red_ribbon_num = _peak_by_types(foods)
 
-    if cooldown.try_fire("manager-log", 2.0, snapshot.monotonic):
-        exec_msg.msg_out("店长特供页面：" f"{_format_foods_zh(foods)}" f"{_format_kitchen_zh(kitchen)}")
+    if cooldown.try_fire("manager-log", 1.0, snapshot.monotonic):
+        exec_msg.msg_out(
+            "店长特供页面："
+            f"{_format_foods_zh(foods)}"
+            # f"{_format_kitchen_zh(kitchen)}"
+        )
 
     # 备菜
     if kitchen.get("咖啡后台") == "空" and kitchen.get("咖啡机") == "空" and cooldown.try_fire("manager:coffee-back-empty-click", 0.5, snapshot.monotonic):
@@ -123,6 +138,10 @@ def execute_manager_supply_tick(
     elif kitchen.get("主食盘") == "牛角包":
         click_physical(265, 471)
 
+    # 打红领巾
+    if red_ribbon_num > 0:
+        click_physical(69, 347)
+
     # 结束关卡
     if _star_count(kitchen) > 0:
-        click_physical(30, 72)
+        click_physical(30, 72, 0.8)

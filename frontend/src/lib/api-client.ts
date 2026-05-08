@@ -148,6 +148,8 @@ export type ManagerStatusResponse = {
 	last_page_id: string | null
 	/** 执行器运行中且处于店长特供页时节流更新的多实例匹配调试（与捕获管线无关） */
 	match_debug?: unknown
+	/** 店长特供页是否仅固定坐标连点（关则图像采集后再决策） */
+	direct_knock: boolean
 }
 
 export function getManagerStatus() {
@@ -165,6 +167,13 @@ export function postManagerStop() {
 	return fetchJson<{ running: boolean }>('/api/manager/stop', {
 		method: 'POST',
 		body: JSON.stringify({})
+	})
+}
+
+export function postManagerDirectKnock(enabled: boolean) {
+	return fetchJson<ManagerStatusResponse>('/api/manager/direct-knock', {
+		method: 'POST',
+		body: JSON.stringify({ enabled })
 	})
 }
 

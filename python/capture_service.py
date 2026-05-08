@@ -54,7 +54,7 @@ LIVE_FPS_WINDOW_S = 1.0
 # 切换 capture_context 时写入的默认匹配阈值（与前端滑条 reset 对齐）
 FISH_PAGE_MATCH_THRESHOLD_DEFAULT = 0.7
 MUSIC_PAGE_MATCH_THRESHOLD_DEFAULT = 0.4
-MANAGER_PAGE_MATCH_THRESHOLD_DEFAULT = 0.7
+MANAGER_PAGE_MATCH_THRESHOLD_DEFAULT = 0.8
 
 _placeholder_preview_cache: bytes | None = None
 

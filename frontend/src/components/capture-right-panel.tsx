@@ -46,11 +46,11 @@ export function CaptureRightPanel() {
 										</span>
 									</div>
 								))}
-								{managerSupplyOverlayBoxes?.map(b => (
+								{/* {managerSupplyOverlayBoxes?.map(b => (
 									<div key={b.key} className='pointer-events-none absolute z-13 rounded-sm text-[8px] whitespace-nowrap' style={b.style} aria-hidden>
 										<div className='absolute top-full bg-black/80 text-white'>{b.similarity != null ? b.similarity.toFixed(2) : '—'}</div>
 									</div>
-								))}
+								))} */}
 							</>
 						)}
 					</div>

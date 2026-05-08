@@ -30,7 +30,7 @@ _FOOD_JSON = _IMG / "food.json"
 _KITCHEN_JSON = _IMG / "kitchen.json"
 
 # 饮品订单图标区（整窗未裁 [x,y,w,h]）
-_ICON_REGION = (166.0, 121.0, 769.0, 208.0)
+_ICON_REGION = (166.0, 129.0, 755.0, 755.0)
 
 # 满意度星星：与订单区同为 ROI 内多数计数；不配 kitchen.json
 _STAR_KITCHEN_KEY = "星星"
@@ -71,7 +71,39 @@ def _parse_food_catalog() -> tuple[tuple[dict[str, Any], ...], frozenset[str]]:
         imgs = [str(x) for x in images if isinstance(x, str)]
         if not imgs:
             continue
-        rows.append({"name": name.strip(), "item_type": itype.strip(), "images": imgs})
+        th_raw = el.get("threshold")
+        th: float | None = None
+        if isinstance(th_raw, (int, float)) and not isinstance(th_raw, bool):
+            try:
+                th_val = float(th_raw)
+                if 0.0 < th_val <= 1.0:
+                    th = th_val
+            except (TypeError, ValueError):
+                th = None
+        region_raw = el.get("region")
+        region: tuple[float, float, float, float] | None = None
+        if isinstance(region_raw, list) and len(region_raw) == 4:
+            try:
+                rx, ry, rw, rh = (
+                    float(region_raw[0]),
+                    float(region_raw[1]),
+                    float(region_raw[2]),
+                    float(region_raw[3]),
+                )
+                if rw > 0 and rh > 0:
+                    region = (rx, ry, rw, rh)
+            except (TypeError, ValueError):
+                region = None
+
+        rows.append(
+            {
+                "name": name.strip(),
+                "item_type": itype.strip(),
+                "images": imgs,
+                "threshold": th,
+                "region": region,
+            }
+        )
     drinks = frozenset(r["name"] for r in rows if r["item_type"] == "饮料")
     return tuple(rows), drinks
 
@@ -120,7 +152,7 @@ class _Catalog:
     """惰性缓存的配置：食物行、图标模板、厨房槽位。"""
 
     food_rows: tuple[dict[str, Any], ...]
-    icon_templates: tuple[tuple[str, str, str], ...]
+    icon_templates: tuple[tuple[str, str, str, float | None, tuple[float, float, float, float] | None], ...]
     kitchen_slots: tuple[dict[str, Any], ...]
 
 
@@ -128,10 +160,19 @@ class _Catalog:
 def _catalog() -> _Catalog:
     """构建并缓存 ``food.json`` / ``kitchen.json`` 衍生结构。"""
     food_rows, drinks = _parse_food_catalog()
-    tpls: list[tuple[str, str, str]] = []
+    tpls: list[tuple[str, str, str, float | None, tuple[float, float, float, float] | None]] = []
     for r in food_rows:
+        th = r.get("threshold")
+        th_v = float(th) if isinstance(th, (int, float)) and not isinstance(th, bool) else None
+        region = r.get("region")
+        region_v: tuple[float, float, float, float] | None = None
+        if isinstance(region, tuple) and len(region) == 4:
+            try:
+                region_v = (float(region[0]), float(region[1]), float(region[2]), float(region[3]))
+            except (TypeError, ValueError):
+                region_v = None
         for fn in r["images"]:
-            tpls.append((fn, r["name"], r["item_type"]))
+            tpls.append((fn, r["name"], r["item_type"], th_v, region_v))
     return _Catalog(
         food_rows=food_rows,
         icon_templates=tuple(tpls),
@@ -223,7 +264,9 @@ def _binary_slot_fallback(positive_label: str, *, slot_name: str) -> str:
     return ""
 
 
-def _count_star_instances(cropped_rgb: Image.Image, *, threshold: float) -> int:
+def _count_star_instances(
+    cropped_rgb: Image.Image,
+) -> int:
     """满意度星星个数：与 ``_run_icon_multimatch`` 单饮品模板相同参数（ROI 内多数实例 + NMS）。"""
     p = _IMG / _STAR_TEMPLATE_FILE
     if not p.is_file():
@@ -232,7 +275,7 @@ def _count_star_instances(cropped_rgb: Image.Image, *, threshold: float) -> int:
         cropped_rgb,
         p,
         _STAR_REGION_PRECROP,
-        threshold=float(threshold),
+        threshold=float(0.7),
         max_matches=12,
         nms_iou=0.35,
     )
@@ -244,12 +287,10 @@ def _best_kitchen_status_page_style(
     cropped_rgb: Image.Image,
     region: tuple[float, float, float, float],
     statuses: list[tuple[str, str]],
-    *,
-    threshold: float,
 ) -> tuple[str, float] | None:
     """与 ``page_template_match._eval_page_features`` 一致：仅采纳 similarity≥阈值的模板，再取置信度最高的一条。"""
     best: tuple[str, float] | None = None
-    th = float(threshold)
+    th = 0.7
     for label, fn in statuses:
         p = _IMG / fn
         if not p.is_file():
@@ -268,8 +309,6 @@ def _best_kitchen_status_page_style(
 def _match_one_kitchen_slot(
     cropped_rgb: Image.Image,
     slot: dict[str, Any],
-    *,
-    threshold: float,
 ) -> str:
     """厨房槽位（json）：单 ROI 单结论，page 式多模板择优。"""
     region = slot["region"]
@@ -279,7 +318,7 @@ def _match_one_kitchen_slot(
     if not statuses:
         return ""
 
-    picked = _best_kitchen_status_page_style(cropped_rgb, region, statuses, threshold=threshold)
+    picked = _best_kitchen_status_page_style(cropped_rgb, region, statuses)
     if picked is not None:
         return picked[0]
 
@@ -288,12 +327,12 @@ def _match_one_kitchen_slot(
     return "未知"
 
 
-def _scan_kitchen_map(cropped_rgb: Image.Image, *, threshold: float) -> dict[str, str]:
+def _scan_kitchen_map(cropped_rgb: Image.Image) -> dict[str, str]:
     """遍历 ``kitchen.json`` 槽位，得到 {槽位名: 状态字符串}。"""
     out: dict[str, str] = {}
     for slot in _catalog().kitchen_slots:
         key = str(slot["name"])
-        out[key] = _match_one_kitchen_slot(cropped_rgb, slot, threshold=threshold)
+        out[key] = _match_one_kitchen_slot(cropped_rgb, slot)
     return out
 
 
@@ -302,16 +341,18 @@ def _run_icon_multimatch(cropped_rgb: Image.Image, *, threshold: float) -> dict[
     t0 = time.perf_counter()
     parts: list[dict[str, object]] = []
     ok = False
-    for fn, disp, itype in _catalog().icon_templates:
+    for fn, disp, itype, th_override, region_override in _catalog().icon_templates:
         p = _IMG / fn
         if not p.is_file():
             continue
         ok = True
+        th_eff = float(th_override) if isinstance(th_override, (int, float)) and not isinstance(th_override, bool) else float(threshold)
+        region_eff = region_override if region_override is not None else _ICON_REGION
         raw = match_template_multi_in_precrop_roi(
             cropped_rgb,
             p,
-            _ICON_REGION,
-            threshold=float(threshold),
+            region_eff,
+            threshold=th_eff,
             max_matches=12,
             nms_iou=0.35,
         )
@@ -320,6 +361,7 @@ def _run_icon_multimatch(cropped_rgb: Image.Image, *, threshold: float) -> dict[
             row["name"] = disp
             row["type"] = itype
             row["template_file"] = fn
+            row["match_region"] = tuple(region_eff)
             parts.append(row)
     ms = (time.perf_counter() - t0) * 1000.0
     if not ok:
@@ -364,6 +406,35 @@ def gather_manager_supply_tick(
     return ManagerSupplyTickSnapshot(monotonic=monotonic, hwnd=hwnd, foods=foods, kitchen=kitchen)
 
 
+def maybe_run_supply_star_only(executor: Any, now: float, page_id: str | None) -> None:
+    """直接敲模式：不跑图标/厨房全景匹配，仅节流更新满意度星星计数到 ``match_debug``。"""
+    if page_id != MANAGER_SUPPLY_PAGE_ID:
+        return
+    if not executor._cooldown.try_fire(
+        "manager:supply:star-only", SUPPLY_MULTIMATCH_MIN_INTERVAL_S, now
+    ):
+        return
+    cropped = executor._capture.get_last_cropped_rgb_copy()
+    if cropped is None:
+        return
+    try:
+        n_stars = int(_count_star_instances(cropped))
+    except Exception:
+        _log.exception("star-only match failed")
+        return
+    with executor._lock:
+        dbg = executor._match_debug
+        if isinstance(dbg, dict):
+            next_dbg = dict(dbg)
+            kitchen = dict(next_dbg.get("kitchen")) if isinstance(next_dbg.get("kitchen"), dict) else {}
+        else:
+            next_dbg = {}
+            kitchen = {}
+        kitchen[_STAR_KITCHEN_KEY] = n_stars
+        next_dbg["kitchen"] = kitchen
+        executor._match_debug = next_dbg
+
+
 def maybe_run_supply_multimatch(executor: Any, now: float, page_id: str | None) -> None:
     """店长「特供」页：节流跑一次图标多模板匹配与厨房槽位扫描，结果写入 ``executor._match_debug``。"""
 
@@ -390,14 +461,14 @@ def maybe_run_supply_multimatch(executor: Any, now: float, page_id: str | None) 
 
     # 厨房：page 式单 ROI 单标签（kitchen.json）
     try:
-        kitchen_map: dict[str, str | int] = dict(_scan_kitchen_map(cropped, threshold=th))
+        kitchen_map: dict[str, str | int] = dict(_scan_kitchen_map(cropped))
     except Exception:
         _log.exception("kitchen scan failed")
         kitchen_map = {}
 
     # 满意度星星：多数计数，单独于厨房槽位
     try:
-        kitchen_map[_STAR_KITCHEN_KEY] = _count_star_instances(cropped, threshold=th)
+        kitchen_map[_STAR_KITCHEN_KEY] = _count_star_instances(cropped)
     except Exception:
         _log.exception("star match failed")
 
