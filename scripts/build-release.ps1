@@ -75,6 +75,31 @@ function Resolve-IsccPath {
     return $null
 }
 
+function Invoke-CompressArchiveWithRetry {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$DestinationPath,
+        [int]$MaxAttempts = 5,
+        [int]$DelaySeconds = 2
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            Compress-Archive -Path $Path -DestinationPath $DestinationPath
+            return
+        } catch {
+            if ($attempt -eq $MaxAttempts) {
+                Write-Error "Portable zip failed after $MaxAttempts attempts. Close any running $appName.exe window and retry. Last error: $($_.Exception.Message)"
+            }
+
+            Write-Warning "Portable zip attempt $attempt/$MaxAttempts failed: $($_.Exception.Message)"
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+}
+
 $iscc = Resolve-IsccPath
 
 if ($iscc) {
@@ -89,6 +114,6 @@ if ($iscc) {
     Write-Host "Optional: install Inno Setup 6 and add to PATH, or set env ISCC to ISCC.exe full path." -ForegroundColor DarkYellow
     $zipOut = Join-Path $root "release\$appName-$ver-portable.zip"
     if (Test-Path $zipOut) { Remove-Item -Force $zipOut }
-    Compress-Archive -Path $outDir -DestinationPath $zipOut
+    Invoke-CompressArchiveWithRetry -Path $outDir -DestinationPath $zipOut
     Write-Host "Done: $zipOut (extract and run $appName.exe)" -ForegroundColor Green
 }
