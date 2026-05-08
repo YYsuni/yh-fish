@@ -20,6 +20,36 @@
 					"region": [16, 70, 122, 39]
 				}
 			]
+		},
+		{
+			"id": "manager-level",
+			"label": "特供选关页面",
+			"features": [
+				{
+					"file": "店长特供.png",
+					"region": [64, 60, 101, 39]
+				}
+			]
+		},
+		{
+			"id": "finish-page",
+			"label": "结束页面",
+			"features": [
+				{
+					"file": "领取.png",
+					"region": [731, 585, 91, 38]
+				}
+			]
+		},
+		{
+			"id": "interact-page",
+			"label": "店长特供交互页面",
+			"features": [
+				{
+					"file": "店长特供-交互.png",
+					"region": [768, 397, 143, 39]
+				}
+			]
 		}
 	]
 }

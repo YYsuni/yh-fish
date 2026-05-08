@@ -4,10 +4,19 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from typing import Callable
 
 _click_offset_provider: Callable[[], tuple[int, int]] | None = None
+
+# 物理输入（SendInput/SetCursorPos）需要串行：避免拖拽过程中插入点击/移动导致行为错乱。
+_PHYSICAL_INPUT_LOCK = threading.Lock()
+
+
+def _try_acquire_physical_input_lock() -> bool:
+    # 直接屏蔽：拖拽/点击进行中时，新的物理输入不排队，直接返回失败。
+    return bool(_PHYSICAL_INPUT_LOCK.acquire(blocking=False))
 
 
 def set_click_offset_provider(fn: Callable[[], tuple[int, int]] | None) -> None:
@@ -38,8 +47,11 @@ if sys.platform == "win32":
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
 
     _INPUT_MOUSE = 0
+    _MOUSEEVENTF_MOVE = 0x0001
     _MOUSEEVENTF_LEFTDOWN = 0x0002
     _MOUSEEVENTF_LEFTUP = 0x0004
+    _MOUSEEVENTF_ABSOLUTE = 0x8000
+    _MOUSEEVENTF_VIRTUALDESK = 0x4000
     _HWND_TOP = 1
     _SWP_NOMOVE = 0x0002
     _SWP_NOSIZE = 0x0001
@@ -113,6 +125,13 @@ if sys.platform == "win32":
         wintypes.UINT,
     ]
     _user32.SetWindowPos.restype = wintypes.BOOL
+    _user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+    _user32.GetSystemMetrics.restype = ctypes.c_int
+
+    _SM_XVIRTUALSCREEN = 76
+    _SM_YVIRTUALSCREEN = 77
+    _SM_CXVIRTUALSCREEN = 78
+    _SM_CYVIRTUALSCREEN = 79
 
     class _MOUSEINPUT(ctypes.Structure):
         _fields_ = (
@@ -281,6 +300,29 @@ if sys.platform == "win32":
         sz = ctypes.sizeof(_INPUT)
         return _user32.SendInput(1, ctypes.byref(inp), sz) == 1
 
+    def _send_input_mouse_move_to_screen(sx: int, sy: int) -> bool:
+        """SendInput 注入一次鼠标移动到屏幕坐标 (sx,sy)（绝对坐标，虚拟桌面）。"""
+        x0 = int(_user32.GetSystemMetrics(_SM_XVIRTUALSCREEN))
+        y0 = int(_user32.GetSystemMetrics(_SM_YVIRTUALSCREEN))
+        w = int(_user32.GetSystemMetrics(_SM_CXVIRTUALSCREEN))
+        h = int(_user32.GetSystemMetrics(_SM_CYVIRTUALSCREEN))
+        if w <= 1 or h <= 1:
+            return False
+
+        # Windows absolute range is [0, 65535] across the virtual screen rectangle.
+        nx = int(round(((int(sx) - x0) * 65535) / (w - 1)))
+        ny = int(round(((int(sy) - y0) * 65535) / (h - 1)))
+        nx = 0 if nx < 0 else 65535 if nx > 65535 else nx
+        ny = 0 if ny < 0 else 65535 if ny > 65535 else ny
+
+        inp = _INPUT()
+        inp.type = _INPUT_MOUSE
+        inp.mi.dx = nx
+        inp.mi.dy = ny
+        inp.mi.dwFlags = _MOUSEEVENTF_MOVE | _MOUSEEVENTF_ABSOLUTE | _MOUSEEVENTF_VIRTUALDESK
+        sz = ctypes.sizeof(_INPUT)
+        return _user32.SendInput(1, ctypes.byref(inp), sz) == 1
+
     def send_key_tap(hwnd: int, vk: int, *, hold_between_down_up_s: float = 0.0) -> bool:
         """KEYDOWN → 可选间隔 → KEYUP；间隔为按下与抬起之间的秒数。"""
         t = _get_active_hwnd(hwnd)
@@ -386,41 +428,133 @@ if sys.platform == "win32":
         src = int(hwnd)
         if src <= 0 or not _user32.IsWindow(wintypes.HWND(src)):
             return False
-        if from_precrop:
-            ox, oy = 0, 0
-            prov = _click_offset_provider
-            if prov is not None:
-                try:
-                    ox, oy = prov()
-                except Exception:
-                    ox, oy = (0, 0)
-            cx, cy = wgc_precrop_xy_to_client(src, int(x), int(y), offset_x=int(ox), offset_y=int(oy))
-        else:
-            cx, cy = int(x), int(y)
-        prev_dpi = None
-        if _set_thread_dpi_ctx is not None:
-            prev_dpi = _set_thread_dpi_ctx(wintypes.HANDLE(_DPI_AWARE_PER_MONITOR_V2))
+        if not _try_acquire_physical_input_lock():
+            return False
         try:
-            focus_hwnd = _get_active_hwnd(src)
-            if bring_foreground and focus_hwnd > 0:
-                _ensure_foreground_and_topmost(focus_hwnd)
-            pt = _POINT(cx, cy)
-            if not _user32.ClientToScreen(wintypes.HWND(src), ctypes.byref(pt)):
-                return False
-            sx, sy = int(pt.x), int(pt.y)
-            if not _user32.SetCursorPos(sx, sy):
-                return False
-            skip_h, hd = _hover_skip_and_seconds(hover_dwell_s)
-            if not skip_h:
-                time.sleep(hd)
-            if not _send_input_mouse(_MOUSEEVENTF_LEFTDOWN):
-                return False
-            hold = MOUSE_CLICK_HOLD_S if hold_s is None else max(0.0, float(hold_s))
-            time.sleep(hold)
-            return _send_input_mouse(_MOUSEEVENTF_LEFTUP)
+            if from_precrop:
+                ox, oy = 0, 0
+                prov = _click_offset_provider
+                if prov is not None:
+                    try:
+                        ox, oy = prov()
+                    except Exception:
+                        ox, oy = (0, 0)
+                cx, cy = wgc_precrop_xy_to_client(src, int(x), int(y), offset_x=int(ox), offset_y=int(oy))
+            else:
+                cx, cy = int(x), int(y)
+            prev_dpi = None
+            if _set_thread_dpi_ctx is not None:
+                prev_dpi = _set_thread_dpi_ctx(wintypes.HANDLE(_DPI_AWARE_PER_MONITOR_V2))
+            try:
+                focus_hwnd = _get_active_hwnd(src)
+                if bring_foreground and focus_hwnd > 0:
+                    _ensure_foreground_and_topmost(focus_hwnd)
+                pt = _POINT(cx, cy)
+                if not _user32.ClientToScreen(wintypes.HWND(src), ctypes.byref(pt)):
+                    return False
+                sx, sy = int(pt.x), int(pt.y)
+                if not _user32.SetCursorPos(sx, sy):
+                    return False
+                skip_h, hd = _hover_skip_and_seconds(hover_dwell_s)
+                if not skip_h:
+                    time.sleep(hd)
+                if not _send_input_mouse(_MOUSEEVENTF_LEFTDOWN):
+                    return False
+                hold = MOUSE_CLICK_HOLD_S if hold_s is None else max(0.0, float(hold_s))
+                time.sleep(hold)
+                return _send_input_mouse(_MOUSEEVENTF_LEFTUP)
+            finally:
+                if prev_dpi is not None and _set_thread_dpi_ctx is not None:
+                    _set_thread_dpi_ctx(prev_dpi)
         finally:
-            if prev_dpi is not None and _set_thread_dpi_ctx is not None:
-                _set_thread_dpi_ctx(prev_dpi)
+            _PHYSICAL_INPUT_LOCK.release()
+
+    def send_drag_physical(
+        hwnd: int,
+        x0: int,
+        y0: int,
+        x1: int,
+        y1: int,
+        *,
+        from_precrop: bool = True,
+        bring_foreground: bool = True,
+        steps: int = 24,
+        step_delay_s: float = 0.01,
+        hold_before_move_s: float = 0.1,
+        hold_after_up_s: float = 0.5,
+    ) -> bool:
+        """物理拖拽：SetCursorPos 到起点 → SendInput 左键按下 → 分步移动到终点 → SendInput 左键抬起。
+
+        `from_precrop=True`：x/y 为 WGC 整帧未裁坐标，先映射到客户区坐标；
+        `from_precrop=False`：x/y 已为客户区坐标（例如裁剪后画面坐标）。
+        """
+        from tools.window_capture import wgc_precrop_xy_to_client
+
+        src = int(hwnd)
+        if src <= 0 or not _user32.IsWindow(wintypes.HWND(src)):
+            return False
+        if not _try_acquire_physical_input_lock():
+            return False
+        try:
+            if from_precrop:
+                ox, oy = 0, 0
+                prov = _click_offset_provider
+                if prov is not None:
+                    try:
+                        ox, oy = prov()
+                    except Exception:
+                        ox, oy = (0, 0)
+                cx0, cy0 = wgc_precrop_xy_to_client(src, int(x0), int(y0), offset_x=int(ox), offset_y=int(oy))
+                cx1, cy1 = wgc_precrop_xy_to_client(src, int(x1), int(y1), offset_x=int(ox), offset_y=int(oy))
+            else:
+                cx0, cy0 = int(x0), int(y0)
+                cx1, cy1 = int(x1), int(y1)
+
+            prev_dpi = None
+            if _set_thread_dpi_ctx is not None:
+                prev_dpi = _set_thread_dpi_ctx(wintypes.HANDLE(_DPI_AWARE_PER_MONITOR_V2))
+            try:
+                focus_hwnd = _get_active_hwnd(src)
+                if bring_foreground and focus_hwnd > 0:
+                    _ensure_foreground_and_topmost(focus_hwnd)
+
+                pt0 = _POINT(int(cx0), int(cy0))
+                if not _user32.ClientToScreen(wintypes.HWND(src), ctypes.byref(pt0)):
+                    return False
+                # Some games/emu only recognize dragging when move events are injected (not just SetCursorPos).
+                _send_input_mouse_move_to_screen(int(pt0.x), int(pt0.y))
+                _user32.SetCursorPos(int(pt0.x), int(pt0.y))
+                if not _send_input_mouse(_MOUSEEVENTF_LEFTDOWN):
+                    return False
+                hb = max(0.0, float(hold_before_move_s))
+                if hb > 0:
+                    time.sleep(hb)
+
+                n = max(1, min(48, int(steps)))
+                delay = max(0.0, float(step_delay_s))
+                for i in range(1, n + 1):
+                    t = i / n
+                    cxi = int(round(cx0 + (cx1 - cx0) * t))
+                    cyi = int(round(cy0 + (cy1 - cy0) * t))
+                    pti = _POINT(int(cxi), int(cyi))
+                    if not _user32.ClientToScreen(wintypes.HWND(src), ctypes.byref(pti)):
+                        continue
+                    _send_input_mouse_move_to_screen(int(pti.x), int(pti.y))
+                    _user32.SetCursorPos(int(pti.x), int(pti.y))
+                    if delay > 0:
+                        time.sleep(delay)
+
+                if not _send_input_mouse(_MOUSEEVENTF_LEFTUP):
+                    return False
+                ha = max(0.0, float(hold_after_up_s))
+                if ha > 0:
+                    time.sleep(ha)
+                return True
+            finally:
+                if prev_dpi is not None and _set_thread_dpi_ctx is not None:
+                    _set_thread_dpi_ctx(prev_dpi)
+        finally:
+            _PHYSICAL_INPUT_LOCK.release()
 
 else:
 
@@ -468,6 +602,23 @@ else:
         bring_foreground: bool = True,
         hover_dwell_s: float | None = None,
         hold_s: float | None = None,
+    ) -> bool:
+        """非 Windows 占位：恒返回 True。"""
+        return True
+
+    def send_drag_physical(
+        hwnd: int,
+        x0: int,
+        y0: int,
+        x1: int,
+        y1: int,
+        *,
+        from_precrop: bool = True,
+        bring_foreground: bool = True,
+        steps: int = 12,
+        step_delay_s: float = 0.02,
+        hold_before_move_s: float = 0.05,
+        hold_after_up_s: float = 0.0,
     ) -> bool:
         """非 Windows 占位：恒返回 True。"""
         return True

@@ -48,6 +48,7 @@ class ManagerExecutor:
         self._cooldown = CooldownGate()
         self._match_debug: dict[str, object] | None = None
         self._direct_knock: bool = True
+        self._auto_select_level: bool = True
 
     def _clear_match_debug_unlocked(self) -> None:
         """在已持有 ``self._lock`` 时清空匹配调试。"""
@@ -85,17 +86,30 @@ class ManagerExecutor:
             last = self._last_page_id
             dbg = self._match_debug if self.is_running() else None
             dk = self._direct_knock
+            asl = self._auto_select_level
         return {
             "running": self.is_running(),
             "last_page_id": last,
             "match_debug": dbg,
             "direct_knock": dk,
+            "auto_select_level": asl,
         }
 
     def set_direct_knock(self, enabled: bool) -> dict[str, object]:
         """店长特供页是否跳过图像采集，仅固定坐标连点。"""
         with self._lock:
             self._direct_knock = bool(enabled)
+        return self.status_dict()
+
+    def is_auto_select_level(self) -> bool:
+        """选关页面是否自动点击最新关卡。"""
+        with self._lock:
+            return bool(self._auto_select_level)
+
+    def set_auto_select_level(self, enabled: bool) -> dict[str, object]:
+        """设置选关页面是否自动点击最新关卡。"""
+        with self._lock:
+            self._auto_select_level = bool(enabled)
         return self.status_dict()
 
     def start(self) -> dict[str, object]:

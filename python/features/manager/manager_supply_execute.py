@@ -65,6 +65,8 @@ def execute_manager_supply_tick(
     direct_knock: bool = False,
 ) -> None:
     """根据快照节流输出日志，并按厨房/订单状态触发固定坐标点击。"""
+    kitchen = snapshot.kitchen
+    foods = snapshot.foods
 
     def click_physical(x: int, y: int, min_interval_s=0.3) -> None:
         """同一坐标节流后发送左键。"""
@@ -76,10 +78,8 @@ def execute_manager_supply_tick(
         return
 
     if direct_knock:
-        click_physical(69, 347)
+        click_physical(69, 347, 0.8)
 
-    kitchen = snapshot.kitchen
-    foods = snapshot.foods
     top_drink, drink_num, top_staple, staple_num, top_dessert, dessert_num, top_red_ribbon, red_ribbon_num = _peak_by_types(foods)
 
     if cooldown.try_fire("manager-log", 1.0, snapshot.monotonic):

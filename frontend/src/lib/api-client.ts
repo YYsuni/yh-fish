@@ -150,6 +150,8 @@ export type ManagerStatusResponse = {
 	match_debug?: unknown
 	/** 店长特供页是否仅固定坐标连点（关则图像采集后再决策） */
 	direct_knock: boolean
+	/** 选关页是否自动点击最新关卡 */
+	auto_select_level: boolean
 }
 
 export function getManagerStatus() {
@@ -172,6 +174,13 @@ export function postManagerStop() {
 
 export function postManagerDirectKnock(enabled: boolean) {
 	return fetchJson<ManagerStatusResponse>('/api/manager/direct-knock', {
+		method: 'POST',
+		body: JSON.stringify({ enabled })
+	})
+}
+
+export function postManagerAutoSelectLevel(enabled: boolean) {
+	return fetchJson<ManagerStatusResponse>('/api/manager/auto-select-level', {
 		method: 'POST',
 		body: JSON.stringify({ enabled })
 	})
