@@ -1,0 +1,15 @@
+{
+	"page_priority": ["钢琴页-21键"],
+	"pages": [
+		{
+			"id": "21-key",
+			"label": "钢琴页-21键",
+			"features": [
+				{
+					"file": "高音.png",
+					"region": [204, 498, 50, 50]
+				}
+			]
+		}
+	]
+}

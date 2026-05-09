@@ -11,7 +11,7 @@ export type PageMatchPayload = {
 /** 与后端 `capture_pipeline_debug.PIPELINE_TIMING_KEYS` 对齐的毫秒耗时（缺省键按 0） */
 export type PipelineMsPayload = Record<string, number>
 
-export type CaptureContextId = 'fish' | 'music' | 'manager'
+export type CaptureContextId = 'fish' | 'music' | 'piano' | 'manager'
 
 export type CaptureStatusResponse = {
 	ok: boolean
@@ -20,7 +20,7 @@ export type CaptureStatusResponse = {
 	height: number
 	fps: number
 	preview_mime: string
-	/** 后端页面模板数据源：钓鱼 pages.json / 超强音 music/page.json */
+	/** 后端页面模板数据源：钓鱼 / 超强音 / 钢琴 / 店长各用各自 JSON */
 	capture_context: CaptureContextId
 	page_match: PageMatchPayload
 	page_match_threshold: number
@@ -138,6 +138,127 @@ export function postMusicStart() {
 
 export function postMusicStop() {
 	return fetchJson<{ running: boolean }>('/api/music/stop', {
+		method: 'POST',
+		body: JSON.stringify({})
+	})
+}
+
+export type PianoStatusResponse = {
+	running: boolean
+	last_page_id: string | null
+	beat_seconds: number
+	score_title: string
+	/** 当前选中的曲谱文件 id（`scores/*.json` stem），新建曲目后为随机 hex */
+	score_id?: string
+	note_index: number
+	note_count: number
+}
+
+export function getPianoStatus() {
+	return fetchJson<PianoStatusResponse>('/api/piano/status')
+}
+
+export type PianoScoreSummary = {
+	id: string
+	title: string
+	createAt: string
+	updateAt: string
+	note_count: number
+}
+
+export type PianoScoresListResponse = {
+	scores: PianoScoreSummary[]
+	selected_id: string
+}
+
+export function getPianoScores() {
+	return fetchJson<PianoScoresListResponse>('/api/piano/scores')
+}
+
+export function postPianoScoreSelect(id: string) {
+	return fetchJson<{ score_id: string }>('/api/piano/scores/select', {
+		method: 'POST',
+		body: JSON.stringify({ id })
+	})
+}
+
+export type PianoTonePayload = { num: string; pitch: string }
+
+export type PianoNotePayload = { num?: string; beat: number; pitch?: string; keys?: PianoTonePayload[] }
+
+export type PianoScoreDetail = {
+	id: string
+	title: string
+	beatSeconds?: number
+	beat_seconds?: number
+	createAt: string
+	updateAt: string
+	notes: PianoNotePayload[]
+}
+
+export function getPianoScore(id: string) {
+	return fetchJson<PianoScoreDetail>(`/api/piano/scores/${encodeURIComponent(id)}`)
+}
+
+export type PianoCreateScorePayload =
+	| { mode: 'friendly'; title: string; beatSeconds: number; notes: PianoNotePayload[] }
+	| { mode: 'raw'; raw_json: string }
+
+export type PianoCreateScoreResponse = {
+	id: string
+	title: string
+	createAt: string
+	updateAt: string
+	note_count: number
+}
+
+export function postPianoScoreCreate(body: PianoCreateScorePayload) {
+	const payload =
+		body.mode === 'raw'
+			? { mode: 'raw', raw_json: body.raw_json }
+			: {
+					mode: 'friendly',
+					title: body.title,
+					beatSeconds: body.beatSeconds,
+					notes: body.notes
+				}
+	return fetchJson<PianoCreateScoreResponse>('/api/piano/scores', {
+		method: 'POST',
+		body: JSON.stringify(payload)
+	})
+}
+
+export function putPianoScoreUpdate(id: string, body: PianoCreateScorePayload) {
+	const payload =
+		body.mode === 'raw'
+			? { mode: 'raw', raw_json: body.raw_json }
+			: {
+					mode: 'friendly',
+					title: body.title,
+					beatSeconds: body.beatSeconds,
+					notes: body.notes
+				}
+	return fetchJson<PianoCreateScoreResponse>(`/api/piano/scores/${encodeURIComponent(id)}`, {
+		method: 'PUT',
+		body: JSON.stringify(payload)
+	})
+}
+
+export function deletePianoScore(id: string) {
+	return fetchJson<{ deleted: boolean; score_id: string; selected_id: string }>(`/api/piano/scores/${encodeURIComponent(id)}`, {
+		method: 'DELETE'
+	})
+}
+
+export function postPianoStart() {
+	return fetchJson<{ running: boolean; started: boolean }>('/api/piano/start', {
+		method: 'POST',
+		body: JSON.stringify({})
+	})
+}
+
+export function postPianoStop() {
+	return fetchJson<{ running: boolean }>('/api/piano/stop', {
 		method: 'POST',
 		body: JSON.stringify({})
 	})

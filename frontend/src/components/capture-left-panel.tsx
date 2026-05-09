@@ -3,12 +3,14 @@ import { Switch } from './ui/switch'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAutoFishStatus } from '../hooks/use-auto-fish-status'
 import { useMusicStatus } from '../hooks/use-music-status'
+import { usePianoStatus } from '../hooks/use-piano-status'
 import { useManagerStatus } from '../hooks/use-manager-status'
 import { AutoFishControls } from './auto-fish/auto-fish-controls'
 import { AutoFishSettings } from './auto-fish/auto-fish-settings'
 import { IconSettings } from './icons/icon-settings'
 import { AppSettingsModal } from './app-settings/app-settings-modal'
 import { MusicSettings } from './music/music-settings'
+import { PianoSettings } from './piano/piano-settings'
 import { ManagerSettings } from './manager/manager-settings'
 import { FPS_MAX, FPS_MIN, MATCH_TH_MAX, MATCH_TH_MIN, useCaptureSession } from './capture-session-context'
 import type { WorkspaceTabId } from './workspace-types'
@@ -36,6 +38,7 @@ export function CaptureLeftPanel({ workspace }: { workspace: WorkspaceTabId }) {
 
 	const fish = useAutoFishStatus()
 	const music = useMusicStatus()
+	const piano = usePianoStatus()
 	const manager = useManagerStatus()
 	const [settingsOpen, setSettingsOpen] = useState(false)
 
@@ -104,6 +107,8 @@ export function CaptureLeftPanel({ workspace }: { workspace: WorkspaceTabId }) {
 				)}
 
 				{workspace === 'music' && <MusicSettings music={music} />}
+
+				{workspace === 'piano' && <PianoSettings piano={piano} />}
 
 				{workspace === 'manager' && <ManagerSettings manager={manager} />}
 			</div>

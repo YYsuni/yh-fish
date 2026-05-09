@@ -58,6 +58,16 @@ function AppWorkspaceShell() {
 					}}>
 					店长特供
 				</div>
+				<div
+					className={clsx('tab', workspace === 'piano' && 'active')}
+					onClick={() => setWorkspace('piano')}
+					role='tab'
+					tabIndex={0}
+					onKeyDown={e => {
+						if (e.key === 'Enter' || e.key === ' ') setWorkspace('piano')
+					}}>
+					钢琴
+				</div>
 			</div>
 
 			<main

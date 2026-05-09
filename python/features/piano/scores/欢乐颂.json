@@ -1,0 +1,85 @@
+{
+	"title": "欢乐颂",
+	"createAt": "2026-05-09T00:00:00Z",
+	"updateAt": "2026-05-09T00:00:00Z",
+	"beatSeconds": 0.5,
+	"notes": [
+		{ "num": "3", "beat": 1, "pitch": "mid" },
+		{ "num": "3", "beat": 1, "pitch": "mid" },
+		{ "num": "4", "beat": 1, "pitch": "mid" },
+		{ "num": "5", "beat": 1, "pitch": "mid" },
+
+		{ "num": "5", "beat": 1, "pitch": "mid" },
+		{ "num": "4", "beat": 1, "pitch": "mid" },
+		{ "num": "3", "beat": 1, "pitch": "mid" },
+		{ "num": "2", "beat": 1, "pitch": "mid" },
+
+		{ "num": "1", "beat": 1, "pitch": "mid" },
+		{ "num": "1", "beat": 1, "pitch": "mid" },
+		{ "num": "2", "beat": 1, "pitch": "mid" },
+		{ "num": "3", "beat": 1, "pitch": "mid" },
+
+		{ "num": "3", "beat": 1.5, "pitch": "mid" },
+		{ "num": "2", "beat": 0.5, "pitch": "mid" },
+		{ "num": "2", "beat": 2, "pitch": "mid" },
+
+		{ "num": "3", "beat": 1, "pitch": "mid" },
+		{ "num": "3", "beat": 1, "pitch": "mid" },
+		{ "num": "4", "beat": 1, "pitch": "mid" },
+		{ "num": "5", "beat": 1, "pitch": "mid" },
+
+		{ "num": "5", "beat": 1, "pitch": "mid" },
+		{ "num": "4", "beat": 1, "pitch": "mid" },
+		{ "num": "3", "beat": 1, "pitch": "mid" },
+		{ "num": "2", "beat": 1, "pitch": "mid" },
+
+		{ "num": "1", "beat": 1, "pitch": "mid" },
+		{ "num": "1", "beat": 1, "pitch": "mid" },
+		{ "num": "2", "beat": 1, "pitch": "mid" },
+		{ "num": "3", "beat": 1, "pitch": "mid" },
+
+		{ "num": "2", "beat": 1.5, "pitch": "mid" },
+		{ "num": "1", "beat": 0.5, "pitch": "mid" },
+		{ "num": "1", "beat": 2, "pitch": "mid" },
+
+		{ "num": "2", "beat": 1, "pitch": "mid" },
+		{ "num": "2", "beat": 1, "pitch": "mid" },
+		{ "num": "3", "beat": 1, "pitch": "mid" },
+		{ "num": "1", "beat": 1, "pitch": "mid" },
+
+		{ "num": "2", "beat": 1, "pitch": "mid" },
+		{ "num": "3", "beat": 0.5, "pitch": "mid" },
+		{ "num": "4", "beat": 0.5, "pitch": "mid" },
+		{ "num": "3", "beat": 1, "pitch": "mid" },
+		{ "num": "1", "beat": 1, "pitch": "mid" },
+
+		{ "num": "2", "beat": 1, "pitch": "mid" },
+		{ "num": "3", "beat": 0.5, "pitch": "mid" },
+		{ "num": "4", "beat": 0.5, "pitch": "mid" },
+		{ "num": "3", "beat": 1, "pitch": "mid" },
+		{ "num": "2", "beat": 1, "pitch": "mid" },
+
+		{ "num": "1", "beat": 1, "pitch": "mid" },
+		{ "num": "2", "beat": 1, "pitch": "mid" },
+		{ "num": "5", "beat": 2, "pitch": "low" },
+
+		{ "num": "3", "beat": 1, "pitch": "mid" },
+		{ "num": "3", "beat": 1, "pitch": "mid" },
+		{ "num": "4", "beat": 1, "pitch": "mid" },
+		{ "num": "5", "beat": 1, "pitch": "mid" },
+
+		{ "num": "5", "beat": 1, "pitch": "mid" },
+		{ "num": "4", "beat": 1, "pitch": "mid" },
+		{ "num": "3", "beat": 1, "pitch": "mid" },
+		{ "num": "2", "beat": 1, "pitch": "mid" },
+
+		{ "num": "1", "beat": 1, "pitch": "mid" },
+		{ "num": "1", "beat": 1, "pitch": "mid" },
+		{ "num": "2", "beat": 1, "pitch": "mid" },
+		{ "num": "3", "beat": 1, "pitch": "mid" },
+
+		{ "num": "2", "beat": 1.5, "pitch": "mid" },
+		{ "num": "1", "beat": 0.5, "pitch": "mid" },
+		{ "num": "1", "beat": 4, "pitch": "mid" }
+	]
+}

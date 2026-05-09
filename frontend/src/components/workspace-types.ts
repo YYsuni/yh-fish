@@ -1,1 +1,1 @@
-export type WorkspaceTabId = 'fish' | 'music' | 'manager'
+export type WorkspaceTabId = 'fish' | 'music' | 'manager' | 'piano'

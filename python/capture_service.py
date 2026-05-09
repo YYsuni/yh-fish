@@ -20,7 +20,12 @@ from tools.capture_pipeline_debug import (
     merge_pipeline_timings,
     perf_elapsed_ms,
 )
-from features.page_match_paths import AUTO_FISH_PAGES_JSON, MANAGER_PAGES_JSON, MUSIC_PAGES_JSON
+from features.page_match_paths import (
+    AUTO_FISH_PAGES_JSON,
+    MANAGER_PAGES_JSON,
+    MUSIC_PAGES_JSON,
+    PIANO_PAGES_JSON,
+)
 from features.music.music_drum_match import compute_music_drum_debug
 from tools.page_template_match import PageMatchResult, PageTemplateMatcher, run_reeling_bar_templates
 from tools.window_capture import WGC_SNAPSHOT_MARGIN_BOTTOM_PX, WGC_SNAPSHOT_MARGIN_LR_PX
@@ -54,6 +59,7 @@ LIVE_FPS_WINDOW_S = 1.0
 # 切换 capture_context 时写入的默认匹配阈值（与前端滑条 reset 对齐）
 FISH_PAGE_MATCH_THRESHOLD_DEFAULT = 0.7
 MUSIC_PAGE_MATCH_THRESHOLD_DEFAULT = 0.4
+PIANO_PAGE_MATCH_THRESHOLD_DEFAULT = 0.8
 MANAGER_PAGE_MATCH_THRESHOLD_DEFAULT = 0.8
 
 _placeholder_preview_cache: bytes | None = None
@@ -154,7 +160,7 @@ def _encode_cropped_to_preview(cropped: Image.Image) -> tuple[bytes, int, int]:
     return buf.getvalue(), cw, ch
 
 
-CaptureContextId = Literal["fish", "music", "manager"]
+CaptureContextId = Literal["fish", "music", "piano", "manager"]
 
 
 @dataclass
@@ -207,6 +213,7 @@ class CaptureService:
         self._page_match: dict[str, object] | None = None
         self._matcher_auto_fish = PageTemplateMatcher(AUTO_FISH_PAGES_JSON)
         self._matcher_music = PageTemplateMatcher(MUSIC_PAGES_JSON)
+        self._matcher_piano = PageTemplateMatcher(PIANO_PAGES_JSON)
         self._matcher_manager = PageTemplateMatcher(MANAGER_PAGES_JSON)
         self._capture_context: CaptureContextId = "fish"
         self._pipeline_ms: dict[str, float] = empty_pipeline_timings()
@@ -231,9 +238,10 @@ class CaptureService:
             return self._fps
 
     def set_page_match_threshold(self, threshold: float) -> float:
-        """设置 OpenCV 模板匹配下限（0–1）；钓鱼与超强音共用同一阈值。"""
+        """设置 OpenCV 模板匹配下限（0–1）；各模式 Matcher 同步该阈值。"""
         v = self._matcher_auto_fish.set_match_threshold(threshold)
         self._matcher_music.set_match_threshold(v)
+        self._matcher_piano.set_match_threshold(v)
         self._matcher_manager.set_match_threshold(v)
         return v
 
@@ -242,16 +250,18 @@ class CaptureService:
         return self._matcher_auto_fish.get_match_threshold()
 
     def get_capture_context(self) -> CaptureContextId:
-        """当前捕获管线使用的页面配置：`fish` 为钓鱼 pages.json，`music` 为超强音 page.json。"""
+        """当前捕获管线使用的页面配置：`fish` / `music` / `piano` / `manager` 对应各自 page(s).json。"""
         with self._lock:
             return self._capture_context
 
     def set_capture_context(self, context: CaptureContextId) -> CaptureContextId:
-        """切换页面匹配数据源，并重置匹配阈值为该模式的默认值（钓鱼 0.7 / 超强音 0.4）。"""
+        """切换页面匹配数据源，并重置匹配阈值为该模式的默认值。"""
         with self._lock:
             self._capture_context = context
         if context == "music":
             default_th = MUSIC_PAGE_MATCH_THRESHOLD_DEFAULT
+        elif context == "piano":
+            default_th = PIANO_PAGE_MATCH_THRESHOLD_DEFAULT
         elif context == "manager":
             default_th = MANAGER_PAGE_MATCH_THRESHOLD_DEFAULT
         else:
@@ -420,6 +430,8 @@ class CaptureService:
                             ctx = self._capture_context
                         if ctx == "music":
                             matcher = self._matcher_music
+                        elif ctx == "piano":
+                            matcher = self._matcher_piano
                         elif ctx == "manager":
                             matcher = self._matcher_manager
                         else:

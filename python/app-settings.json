@@ -7,7 +7,7 @@
     "meta": false
   },
   "stop": {
-    "key": null,
+    "key": "F12",
     "ctrl": false,
     "shift": false,
     "alt": false,

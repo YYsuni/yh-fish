@@ -9,5 +9,6 @@ from app_paths import python_pkg_root
 
 AUTO_FISH_PAGES_JSON: Path = python_pkg_root() / "images" / "auto_fish" / "pages.json"
 MUSIC_PAGES_JSON: Path = python_pkg_root() / "images" / "music" / "page.json"
+PIANO_PAGES_JSON: Path = python_pkg_root() / "images" / "piano" / "page.json"
 MANAGER_PAGES_JSON: Path = python_pkg_root() / "images" / "manager" / "page.json"
 

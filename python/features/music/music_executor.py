@@ -106,7 +106,7 @@ def _page_drum(ctx: MusicTickContext) -> None:
             continue
 
         label = str(it.get("label", "?"))
-        exec_msg.msg_out(f"敲鼓 [{label}]：沿 ↓ sim {sval:.2f} < {th:.2f}")
+        exec_msg.msg_out(f"敲鼓 {label}")
         game_input.send_key_tap(ctx.hwnd, vk_code)
 
 

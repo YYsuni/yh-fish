@@ -15,6 +15,7 @@ from features.auto_fish.auto_fish_executor import AutoFishExecutor
 from capture_service import CaptureService
 from features.manager.manager_executor import ManagerExecutor
 from features.music.music_executor import MusicExecutor
+from features.piano.piano_executor import PianoExecutor
 from server import create_app
 
 
@@ -76,8 +77,17 @@ def main(argv: list[str] | None = None) -> None:
     cap = CaptureService()
     fish = AutoFishExecutor(cap)
     music = MusicExecutor(cap)
+    piano = PianoExecutor(cap)
     manager = ManagerExecutor(cap)
-    app = create_app(capture=cap, auto_fish=fish, music=music, manager=manager, serve_static=static, dist_dir=d)
+    app = create_app(
+        capture=cap,
+        auto_fish=fish,
+        music=music,
+        piano=piano,
+        manager=manager,
+        serve_static=static,
+        dist_dir=d,
+    )
 
     srv = uvicorn.Server(uvicorn.Config(app, host=args.host, port=args.port, log_level="info", access_log=False))
     threading.Thread(target=srv.run, daemon=True).start()

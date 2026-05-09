@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -20,6 +20,7 @@ from features.auto_fish.auto_fish_executor import AutoFishExecutor
 from capture_service import CaptureService
 from features.manager.manager_executor import ManagerExecutor
 from features.music.music_executor import MusicExecutor
+from features.piano.piano_executor import PianoExecutor
 from tools.exec_msg import snapshot as msg_snapshot, start_admin_warn_loop, stop_admin_warn_loop
 import tools.game_input as game_input
 from tools.app_settings import AppSettingsPayload, HotkeyPayload, load_app_settings, save_app_settings
@@ -42,9 +43,9 @@ class SetMatchThresholdBody(BaseModel):
 
 
 class SetCaptureContextBody(BaseModel):
-    """POST `/api/capture/context`：切换页面匹配使用的配置（钓鱼 auto_fish/pages.json ↔ 超强音 music/page.json）。"""
+    """POST `/api/capture/context`：切换页面匹配使用的配置（钓鱼 / music / piano / manager 各用各自 JSON）。"""
 
-    context: Literal["fish", "music", "manager"]
+    context: Literal["fish", "music", "piano", "manager"]
 
 
 class SetAutoFishLogicBody(BaseModel):
@@ -71,6 +72,27 @@ class SetManagerAutoSelectLevelBody(BaseModel):
     enabled: bool
 
 
+class PianoSelectScoreBody(BaseModel):
+    """POST `/api/piano/scores/select`：选中曲谱（`scores/*.json` 的文件名 stem）。"""
+
+    id: str = Field(min_length=1)
+
+
+class PianoCreateScoreBody(BaseModel):
+    """POST `/api/piano/scores`：新建曲谱。"""
+
+    mode: Literal["friendly", "raw"] = "friendly"
+    title: str | None = None
+    beat_seconds: float | None = Field(None, ge=0.05, le=120.0)
+    beatSeconds: float | None = Field(None, ge=0.05, le=120.0)
+    notes: list[dict[str, Any]] | None = None
+    raw_json: str | None = None
+
+
+class PianoUpdateScoreBody(PianoCreateScoreBody):
+    """PUT `/api/piano/scores/{score_id}`：更新已有曲谱。"""
+
+
 PY_DIR = Path(__file__).resolve().parent
 
 
@@ -79,6 +101,7 @@ def create_app(
     capture: CaptureService,
     auto_fish: AutoFishExecutor,
     music: MusicExecutor,
+    piano: PianoExecutor,
     manager: ManagerExecutor,
     serve_static: bool,
     dist_dir: Path,
@@ -194,6 +217,7 @@ def create_app(
                 if _match(hk.stop):
                     auto_fish.stop()
                     music.stop()
+                    piano.stop()
                     manager.stop()
                     return
 
@@ -203,14 +227,22 @@ def create_app(
                         ctx = capture.get_status().capture_context
                         if ctx == "music":
                             auto_fish.stop()
+                            piano.stop()
                             manager.stop()
                             music.start()
+                        elif ctx == "piano":
+                            auto_fish.stop()
+                            music.stop()
+                            manager.stop()
+                            piano.start()
                         elif ctx == "manager":
                             auto_fish.stop()
                             music.stop()
+                            piano.stop()
                             manager.start()
                         else:
                             music.stop()
+                            piano.stop()
                             manager.stop()
                             auto_fish.start()
                     except Exception:
@@ -242,6 +274,7 @@ def create_app(
         hotkey_t.join(timeout=2.0)
         auto_fish.stop()
         music.stop()
+        piano.stop()
         manager.stop()
         capture.stop_background()
 
@@ -306,7 +339,7 @@ def create_app(
 
     @app.post("/api/capture/context")
     def cap_set_context(body: SetCaptureContextBody) -> dict[str, float | str]:
-        """切换捕获管线使用的页面 JSON（钓鱼 / 超强音），并重置匹配阈值为该模式默认值。"""
+        """切换捕获管线使用的页面 JSON（钓鱼 / 超强音 / 钢琴 / 店长），并重置匹配阈值为该模式默认值。"""
         ctx = capture.set_capture_context(body.context)
         return {"capture_context": ctx, "page_match_threshold": capture.get_page_match_threshold()}
 
@@ -319,6 +352,7 @@ def create_app(
     def auto_fish_start() -> dict[str, object]:
         """启动自动钓鱼轮询线程（幂等：已在跑则 `started: false`）。"""
         music.stop()
+        piano.stop()
         return auto_fish.start()
 
     @app.post("/api/auto-fish/stop")
@@ -345,6 +379,7 @@ def create_app(
     def music_start() -> dict[str, object]:
         """启动超强音 ROI 匹配线程；会先停止自动钓鱼。"""
         auto_fish.stop()
+        piano.stop()
         manager.stop()
         return music.start()
 
@@ -352,6 +387,103 @@ def create_app(
     def music_stop() -> dict[str, object]:
         """停止超强音线程。"""
         return music.stop()
+
+    @app.get("/api/piano/status")
+    def piano_status() -> dict[str, object]:
+        """钢琴执行器是否在跑、最近一次识别到的 page_id。"""
+        return piano.status_dict()
+
+    @app.get("/api/piano/scores")
+    def piano_scores_list() -> dict[str, Any]:
+        """列出 `features/piano/scores` 下曲谱（按 ``updateAt`` 降序），并附带当前选中 id。"""
+        return {"scores": piano.list_score_summaries(), "selected_id": piano.status_dict().get("score_id")}
+
+    @app.get("/api/piano/scores/{score_id}")
+    def piano_scores_get(score_id: str) -> dict[str, Any]:
+        """读取单个曲谱完整 JSON，供编辑弹窗回填。"""
+        try:
+            return piano.get_score(score_id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="score not found") from None
+
+    @app.post("/api/piano/scores/select")
+    def piano_scores_select(body: PianoSelectScoreBody) -> dict[str, Any]:
+        """切换选中曲谱并重置播放进度。"""
+        try:
+            return piano.set_selected_score(body.id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="score not found") from None
+
+    @app.post("/api/piano/scores")
+    def piano_scores_create(body: PianoCreateScoreBody) -> dict[str, Any]:
+        """新建曲谱 JSON（文件名随机 hex）；校验 ``notes`` 与 ``pitch``。"""
+        try:
+            if body.mode == "raw":
+                if body.raw_json is None or not str(body.raw_json).strip():
+                    raise HTTPException(status_code=400, detail="raw_json required")
+                raw = json.loads(body.raw_json)
+                if not isinstance(raw, dict):
+                    raise HTTPException(status_code=400, detail="raw_json must be an object")
+                return piano.create_score_from_raw_dict(raw)
+            bs = body.beat_seconds if body.beat_seconds is not None else body.beatSeconds
+            if bs is None:
+                bs = 1.0
+            title = (body.title or "").strip() or "未命名"
+            notes = body.notes if body.notes is not None else []
+            return piano.create_score(title, float(bs), list(notes))
+        except HTTPException:
+            raise
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"invalid json: {e}") from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+    @app.put("/api/piano/scores/{score_id}")
+    def piano_scores_update(score_id: str, body: PianoUpdateScoreBody) -> dict[str, Any]:
+        """更新已有曲谱 JSON，并刷新 ``updateAt``。"""
+        try:
+            if body.mode == "raw":
+                if body.raw_json is None or not str(body.raw_json).strip():
+                    raise HTTPException(status_code=400, detail="raw_json required")
+                raw = json.loads(body.raw_json)
+                if not isinstance(raw, dict):
+                    raise HTTPException(status_code=400, detail="raw_json must be an object")
+                return piano.update_score_from_raw_dict(score_id, raw)
+            bs = body.beat_seconds if body.beat_seconds is not None else body.beatSeconds
+            if bs is None:
+                bs = 1.0
+            title = (body.title or "").strip() or "未命名"
+            notes = body.notes if body.notes is not None else []
+            return piano.update_score(score_id, title, float(bs), list(notes))
+        except HTTPException:
+            raise
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="score not found") from None
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"invalid json: {e}") from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+    @app.delete("/api/piano/scores/{score_id}")
+    def piano_scores_delete(score_id: str) -> dict[str, Any]:
+        """删除已有曲谱；若删除的是当前选中曲谱，则自动切到剩余最新曲谱。"""
+        try:
+            return piano.delete_score(score_id)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="score not found") from None
+
+    @app.post("/api/piano/start")
+    def piano_start() -> dict[str, object]:
+        """启动钢琴线程；会先停止自动钓鱼与其它模式执行器。"""
+        auto_fish.stop()
+        music.stop()
+        manager.stop()
+        return piano.start()
+
+    @app.post("/api/piano/stop")
+    def piano_stop() -> dict[str, object]:
+        """停止钢琴线程。"""
+        return piano.stop()
 
     @app.get("/api/manager/status")
     def manager_status() -> dict[str, object]:
@@ -363,6 +495,7 @@ def create_app(
         """启动店长特供线程；会先停止其他执行器。"""
         auto_fish.stop()
         music.stop()
+        piano.stop()
         return manager.start()
 
     @app.post("/api/manager/stop")
