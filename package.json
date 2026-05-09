@@ -1,6 +1,6 @@
 {
 	"name": "yh-fish",
-	"version": "1.3.0",
+	"version": "1.4.0",
 	"appDisplayName": "异环钓鱼",
 	"main": "index.js",
 	"packageManager": "pnpm@10.4.0",
