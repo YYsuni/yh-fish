@@ -268,6 +268,13 @@ def _page_month_card(ctx: TickContext) -> None:
     game_input.send_left_click_physical(ctx.hwnd, 635, 366, hover_dwell_s=0.45, hold_s=0.2)
 
 
+def _page_login_page(ctx: TickContext) -> None:
+    if not ctx.cooldown.try_fire("login-page:click", 3.0, ctx.monotonic):
+        return
+    exec_msg.msg_out("登录页面：点击进入游戏")
+    game_input.send_left_click_physical(ctx.hwnd, 638, 663, hover_dwell_s=0.45, hold_s=0.2)
+
+
 PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
     "reeling": _page_reeling,
     "start-fishing": _page_start_fishing,
@@ -287,6 +294,7 @@ PAGE_HANDLERS: dict[str, Callable[[TickContext], None]] = {
     "tip-no-fish": _page_tip_no_fish,
     "empty": _page_empty,
     "month-card": _page_month_card,
+    "login-page": _page_login_page,
 }
 
 
